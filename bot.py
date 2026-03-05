@@ -1,17 +1,17 @@
 import os
+import time
 from telegram import Bot
 from scraper import get_deals
 
-TOKEN = os.getenv("8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok")
-CHAT_ID = os.getenv("432826122")
+TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
 bot = Bot(token=TOKEN)
 
-deals = get_deals()
-
-for d in deals:
-
-    message = f"""
+while True:
+    deals = get_deals()
+    for d in deals:
+        message = f"""
 🔥 عرض جديد
 
 {d['title']}
@@ -21,5 +21,5 @@ for d in deals:
 
 {d['link']}
 """
-
-    bot.send_message(chat_id=CHAT_ID, text=message)
+        bot.send_message(chat_id=CHAT_ID, text=message)
+    time.sleep(600)  # كل 10 دقائق
