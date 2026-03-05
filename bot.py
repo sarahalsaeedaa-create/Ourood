@@ -6,13 +6,10 @@ import requests
 import cloudscraper
 from datetime import datetime
 from bs4 import BeautifulSoup
-from dotenv import load_dotenv
 from telegram import Bot
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask
 from fake_useragent import UserAgent
-
-load_dotenv()
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -21,8 +18,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== الإعدادات ==========
-TELEGRAM_BOT_TOKEN = os.getenv('8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok')
-TELEGRAM_CHAT_ID = os.getenv('432826122')
+# ⚠️ غير دول لما تنقل للـ Render
+TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
+TELEGRAM_CHAT_ID = "432826122"
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 app = Flask(__name__)
@@ -45,7 +43,6 @@ def search_amazon_sa_deals():
     """
     deals = []
     
-    # الكلمات المفتاحية للبحث
     search_terms = [
         "fashion women",
         "fashion men", 
@@ -76,15 +73,12 @@ def search_amazon_sa_deals():
                 logger.warning(f"Status code: {response.status_code} for {term}")
                 continue
             
-            # ✅ استخدم html.parser بدل lxml
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # البحث عن المنتجات
             items = soup.find_all('div', {'data-component-type': 's-search-result'})
             
             for item in items:
                 try:
-                    # استخراج السعر
                     price_whole = item.find('span', class_='a-price-whole')
                     price_fraction = item.find('span', class_='a-price-fraction')
                     
@@ -100,7 +94,6 @@ def search_amazon_sa_deals():
                     except:
                         continue
                     
-                    # استخراج السعر الأصلي (لو موجود)
                     old_price_elem = item.find('span', class_='a-text-price')
                     old_price = 0
                     discount_percent = 0
@@ -116,14 +109,12 @@ def search_amazon_sa_deals():
                             except:
                                 pass
                     
-                    # استخراج العنوان
                     title_tag = item.find('h2', class_='a-size-mini')
                     if not title_tag:
                         title_tag = item.find('span', class_='a-size-base-plus')
                     
                     title = title_tag.text.strip() if title_tag else 'Unknown Product'
                     
-                    # استخراج الرابط
                     link_tag = item.find('a', class_='a-link-normal')
                     link = ''
                     if link_tag and link_tag.get('href'):
@@ -133,11 +124,9 @@ def search_amazon_sa_deals():
                         else:
                             link = f'https://www.amazon.sa/dp/{href.split("/dp/")[1].split("/")[0]}' if '/dp/' in href else href
                     
-                    # استخراج الصورة
                     img_tag = item.find('img', class_='s-image')
                     image = img_tag.get('src', '') if img_tag else ''
                     
-                    # استخراج التقييم
                     rating_elem = item.find('span', class_='a-icon-alt')
                     rating = ''
                     if rating_elem:
@@ -178,10 +167,7 @@ def filter_glitch_deals(deals):
         price = deal['price']
         discount = deal['discount']
         
-        # الشرط: سعر < 1 ريال
         is_glitch = price < 1.0 and price > 0
-        
-        # أو خصم >= 60%
         is_good_deal = discount >= 60
         
         if is_glitch or is_good_deal:
@@ -189,7 +175,6 @@ def filter_glitch_deals(deals):
             deal['savings'] = deal['old_price'] - price if deal['old_price'] > 0 else 0
             filtered.append(deal)
     
-    # ترتيب حسب الأفضلية: Glitch أولاً، بعدين حسب الخصم
     filtered.sort(key=lambda x: (0 if x['deal_type'] == '🔥 GLITCH' else 1, -x['discount']))
     
     return filtered
@@ -214,7 +199,6 @@ async def send_deals_to_telegram(deals):
         logger.info("No deals found")
         return
     
-    # إرسال ملخص
     glitch_count = sum(1 for d in deals if d['deal_type'] == '🔥 GLITCH')
     discount_count = len(deals) - glitch_count
     
@@ -235,8 +219,7 @@ async def send_deals_to_telegram(deals):
         parse_mode='Markdown'
     )
     
-    # إرسال كل عرض
-    for i, deal in enumerate(deals[:15], 1):  # أقصى 15 عرض
+    for i, deal in enumerate(deals[:15], 1):
         savings_text = f"💵 توفير: {deal['savings']:.2f} ريال\n" if deal['savings'] > 0 else ""
         rating_text = f"⭐ تقييم: {deal['rating']}/5\n" if deal['rating'] else ""
         
@@ -268,7 +251,6 @@ async def send_deals_to_telegram(deals):
                 )
         except Exception as e:
             logger.error(f"Error sending deal {i}: {e}")
-            # Try without image
             try:
                 await bot.send_message(
                     chat_id=TELEGRAM_CHAT_ID,
@@ -324,7 +306,6 @@ def status():
 
 # ========== التشغيل ==========
 if __name__ == "__main__":
-    # جدولة البحث كل 10 دقائق
     scheduler = BackgroundScheduler()
     scheduler.add_job(job, 'interval', minutes=10, id='amazon_scan', replace_existing=True)
     scheduler.start()
@@ -332,7 +313,6 @@ if __name__ == "__main__":
     logger.info("🤖 البوت اشتغال...")
     logger.info(f"Telegram Chat ID: {TELEGRAM_CHAT_ID}")
     
-    # تشغيل أول مرة بعد 5 ثواني
     import threading
     def start_job():
         import time
@@ -341,6 +321,5 @@ if __name__ == "__main__":
     
     threading.Thread(target=start_job).start()
     
-    # تشغيل Flask
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port)
