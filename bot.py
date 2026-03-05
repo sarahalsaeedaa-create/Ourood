@@ -21,8 +21,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== الإعدادات ==========
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TELEGRAM_BOT_TOKEN = os.getenv('8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok')
+TELEGRAM_CHAT_ID = os.getenv('432826122')
 
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
 app = Flask(__name__)
