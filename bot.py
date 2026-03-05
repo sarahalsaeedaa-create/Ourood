@@ -28,9 +28,8 @@ app = Flask(__name__)
 
 ua = UserAgent()
 
-# ========== دالة إنشاء Session محسنة ==========
+# ========== دالة إنشاء Session ==========
 def create_session():
-    """إنشاء session مع headers واقعية"""
     session = cloudscraper.create_scraper(
         browser={
             'browser': 'chrome',
@@ -43,7 +42,7 @@ def create_session():
     
     headers = {
         'User-Agent': ua.random,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
         'Accept-Encoding': 'gzip, deflate, br',
         'Referer': 'https://www.amazon.sa/',
@@ -58,21 +57,18 @@ def create_session():
     session.headers.update(headers)
     return session
 
-# ========== دالة جلب صفحة Deals ==========
+# ========== دالة جلب الصفحة ==========
 def get_deals_page(session, url):
-    """جلب صفحة deals مع retry"""
     max_retries = 3
     for attempt in range(max_retries):
         try:
-            # تأخير عشوائي بين 2-5 ثواني
             time.sleep(random.uniform(2, 5))
-            
             response = session.get(url, timeout=30)
             
             if response.status_code == 200:
                 return response.text
             elif response.status_code == 503:
-                logger.warning(f"Attempt {attempt + 1}: Service Unavailable (503)")
+                logger.warning(f"Attempt {attempt + 1}: 503")
                 time.sleep(5)
             else:
                 logger.warning(f"Status {response.status_code}")
@@ -86,22 +82,53 @@ def get_deals_page(session, url):
 
 # ========== دالة البحث في Amazon.sa ==========
 def search_amazon_sa_deals():
-    """
-    البحث في Amazon.sa عن عروض Fashion و Beauty
-    """
     deals = []
     session = create_session()
     
-    # روابط الـ Deals الرسمية (أفضل من البحث العادي)
+    # ===== روابط Deals متنوعة =====
     deal_urls = [
+        # Deals الرسمية
         "https://www.amazon.sa/gp/goldbox",
         "https://www.amazon.sa/deals/fashion",
         "https://www.amazon.sa/deals/beauty",
-        "https://www.amazon.sa/s?k=fashion&rh=p_8%3A30-99",
-        "https://www.amazon.sa/s?k=beauty&rh=p_8%3A30-99",
-        "https://www.amazon.sa/s?k=perfume&rh=p_8%3A30-99",
-        "https://www.amazon.sa/s?k=makeup&rh=p_8%3A30-99",
-        "https://www.amazon.sa/s?k=skincare&rh=p_8%3A30-99",
+        
+        # Fashion ماركات عالية
+        "https://www.amazon.sa/s?k=adidas+fashion&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=nike+fashion&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=puma+fashion&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=calvin+klein&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=tommy+hilfiger&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=lacoste&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=guess&rh=p_8%3A30-99",
+        
+        # أحذية ماركات
+        "https://www.amazon.sa/s?k=adidas+shoes&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=nike+shoes&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=reebok+shoes&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=skechers&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=new+balance&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=under+armour+shoes&rh=p_8%3A30-99",
+        
+        # Best Sellers مع خصم
+        "https://www.amazon.sa/gp/bestsellers/fashion",
+        "https://www.amazon.sa/gp/bestsellers/beauty",
+        "https://www.amazon.sa/gp/bestsellers/shoes",
+        
+        # Beauty ماركات
+        "https://www.amazon.sa/s?k=loreal&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=maybelline&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=nyx&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99",
+        
+        # ساعات وإكسسوارات
+        "https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=fossil+watch&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=ray+ban&rh=p_8%3A30-99",
+        
+        # شنط
+        "https://www.amazon.sa/s?k=adidas+bag&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=nike+bag&rh=p_8%3A30-99",
+        "https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99",
     ]
     
     for url in deal_urls:
@@ -116,24 +143,18 @@ def search_amazon_sa_deals():
             
             # البحث عن المنتجات بطرق مختلفة
             items = []
-            
-            # طريقة 1: Deal cards
             items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
-            
-            # طريقة 2: Search results
             items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
-            
-            # طريقة 3: Grid items
             items.extend(soup.find_all('div', class_='a-section'))
+            items.extend(soup.find_all('li', class_='zg-item-immersion'))  # Best sellers
             
-            logger.info(f"Found {len(items)} raw items in {url}")
+            logger.info(f"Found {len(items)} items in {url}")
             
             for item in items:
                 try:
-                    # ===== استخراج السعر الحالي =====
                     price = None
                     
-                    # طريقة 1: a-price-whole
+                    # استخراج السعر
                     price_whole = item.find('span', class_='a-price-whole')
                     if price_whole:
                         price_text = price_whole.text.replace(',', '').replace('ريال', '').strip()
@@ -142,7 +163,6 @@ def search_amazon_sa_deals():
                         except:
                             pass
                     
-                    # طريقة 2: a-offscreen
                     if not price:
                         price_off = item.find('span', class_='a-offscreen')
                         if price_off:
@@ -153,27 +173,13 @@ def search_amazon_sa_deals():
                                 except:
                                     pass
                     
-                    # طريقة 3: Deal price
-                    if not price:
-                        deal_price = item.find('span', class_='a-price')
-                        if deal_price:
-                            price_text = deal_price.find('span', class_='a-offscreen')
-                            if price_text:
-                                price_match = re.search(r'[\d,]+\.?\d*', price_text.text.replace(',', ''))
-                                if price_match:
-                                    try:
-                                        price = float(price_match.group())
-                                    except:
-                                        pass
-                    
                     if not price or price <= 0:
                         continue
                     
-                    # ===== استخراج السعر القديم والخصم =====
+                    # استخراج السعر القديم والخصم
                     old_price = 0
                     discount_percent = 0
                     
-                    # طريقة 1: a-text-price (السعر القديم)
                     old_price_elem = item.find('span', class_='a-text-price')
                     if old_price_elem:
                         old_text = old_price_elem.find('span', class_='a-offscreen')
@@ -187,7 +193,7 @@ def search_amazon_sa_deals():
                                 except:
                                     pass
                     
-                    # طريقة 2: Badge الخصم
+                    # Badge الخصم
                     if discount_percent == 0:
                         badge = item.find('span', class_=re.compile('a-badge-text|s-coupon-highlight-color'))
                         if badge:
@@ -195,11 +201,10 @@ def search_amazon_sa_deals():
                             discount_match = re.search(r'(\d+)%', badge_text)
                             if discount_match:
                                 discount_percent = int(discount_match.group(1))
-                                # تقدير السعر القديم
                                 if discount_percent > 0:
                                     old_price = price / (1 - discount_percent/100)
                     
-                    # ===== استخراج العنوان =====
+                    # استخراج العنوان
                     title = "Unknown Product"
                     title_selectors = [
                         'h2 a span',
@@ -207,17 +212,18 @@ def search_amazon_sa_deals():
                         '.a-size-mini span',
                         '.a-size-base-plus',
                         '[data-testid="product-title"]',
-                        'a[data-testid="deal-title"]'
+                        'a[data-testid="deal-title"]',
+                        '.p13n-sc-truncated'
                     ]
                     
                     for selector in title_selectors:
                         title_elem = item.select_one(selector)
                         if title_elem:
                             title = title_elem.text.strip()
-                            if len(title) > 5:
+                            if len(title) > 3:
                                 break
                     
-                    # ===== استخراج الرابط =====
+                    # استخراج الرابط
                     link = ""
                     link_elem = item.find('a', href=True)
                     if link_elem:
@@ -229,7 +235,7 @@ def search_amazon_sa_deals():
                         else:
                             link = f'https://www.amazon.sa/dp/{href.split("/dp/")[1].split("/")[0]}' if '/dp/' in href else f'https://www.amazon.sa{href}'
                     
-                    # ===== استخراج الصورة =====
+                    # استخراج الصورة
                     image = ""
                     img_selectors = ['img.s-image', 'img[src]', '[data-testid="product-image"] img']
                     for selector in img_selectors:
@@ -239,13 +245,32 @@ def search_amazon_sa_deals():
                             if image and image.startswith('http'):
                                 break
                     
-                    # ===== استخراج التقييم =====
+                    # استخراج التقييم
                     rating = ""
                     rating_elem = item.find('span', class_='a-icon-alt')
                     if rating_elem:
                         rating_match = re.search(r'([\d.]+)', rating_elem.text)
                         if rating_match:
                             rating = rating_match.group(1)
+                    
+                    # تحديد الفئة
+                    category = "عام"
+                    if 'adidas' in url.lower():
+                        category = "👟 Adidas"
+                    elif 'nike' in url.lower():
+                        category = "👟 Nike"
+                    elif 'shoes' in url.lower() or 'أحذية' in url:
+                        category = "👟 أحذية"
+                    elif 'watch' in url.lower() or 'ساعات' in url:
+                        category = "⌚ ساعات"
+                    elif 'bag' in url.lower() or 'handbag' in url:
+                        category = "👜 شنط"
+                    elif 'beauty' in url.lower() or 'makeup' in url:
+                        category = "💄 Beauty"
+                    elif 'fashion' in url.lower():
+                        category = "👕 Fashion"
+                    elif 'bestseller' in url.lower():
+                        category = "⭐ Best Seller"
                     
                     deals.append({
                         'title': title,
@@ -255,29 +280,24 @@ def search_amazon_sa_deals():
                         'link': link,
                         'image': image,
                         'rating': rating,
-                        'source': url.split('/')[-1] if '/' in url else url
+                        'category': category,
+                        'source': url
                     })
                     
                 except Exception as e:
                     continue
             
-            # تأخير بين الصفحات
             time.sleep(random.uniform(3, 6))
             
         except Exception as e:
             logger.error(f"Error with {url}: {e}")
             continue
     
-    logger.info(f"Total deals collected: {len(deals)}")
+    logger.info(f"Total raw deals: {len(deals)}")
     return deals
 
 # ========== التصفية ==========
 def filter_glitch_deals(deals):
-    """
-    تصفية العروض:
-    - السعر < 1 ريال (Glitch)
-    - أو الخصم >= 50% (غيرتها من 60% عشان تجرب)
-    """
     filtered = []
     
     for deal in deals:
@@ -287,7 +307,7 @@ def filter_glitch_deals(deals):
         # شرط 1: سعر < 1 ريال
         is_glitch = price < 1.0 and price > 0
         
-        # شرط 2: خصم >= 50% (غيرت من 60% عشان تجرب)
+        # شرط 2: خصم >= 50%
         is_good_deal = discount >= 50
         
         if is_glitch or is_good_deal:
@@ -295,10 +315,10 @@ def filter_glitch_deals(deals):
             deal['savings'] = round(deal['old_price'] - price, 2) if deal['old_price'] > 0 else 0
             filtered.append(deal)
     
-    # ترتيب: Glitch أولاً، بعدين حسب الخصم
+    # ترتيب
     filtered.sort(key=lambda x: (0 if x['deal_type'] == '🔥 GLITCH' else 1, -x['discount']))
     
-    # إزالة التكرارات (نفس الرابط)
+    # إزالة التكرار
     seen_links = set()
     unique_deals = []
     for deal in filtered:
@@ -306,7 +326,7 @@ def filter_glitch_deals(deals):
             seen_links.add(deal['link'])
             unique_deals.append(deal)
     
-    logger.info(f"Filtered to {len(unique_deals)} unique deals")
+    logger.info(f"Filtered: {len(unique_deals)} unique deals")
     return unique_deals
 
 # ========== إرسال Telegram ==========
@@ -318,8 +338,6 @@ async def send_deals_to_telegram(deals):
 🔍 لا توجد عروض تطابق المعايير:
 • السعر < 1 ريال ⭐
 • أو خصم ≥ 50% 💰
-
-💡 *نصيحة*: جرب تفتح Amazon.sa يدوياً وتشوف العروض
 
 سيتم البحث مرة أخرى بعد 10 دقائق...
         """
@@ -339,7 +357,7 @@ async def send_deals_to_telegram(deals):
 ⏰ {datetime.now().strftime('%Y-%m-%d %H:%M')}
 
 📊 التفاصيل:
-• 🔥 Glitch Deals (< 1 ريال): {glitch_count}
+• 🔥 Glitch (< 1 ريال): {glitch_count}
 • 💰 خصومات ≥ 50%: {discount_count}
 
 ━━━━━━━━━━━━━━━
@@ -351,21 +369,22 @@ async def send_deals_to_telegram(deals):
         parse_mode='Markdown'
     )
     
-    for i, deal in enumerate(deals[:20], 1):  # زودت لـ 20 عرض
+    # ✅ بعت كل العروض مش 3 بس
+    for i, deal in enumerate(deals, 1):  # شيلت [:15] عشان يبعت الكل
         savings_text = f"💵 توفير: {deal['savings']:.2f} ريال\n" if deal['savings'] > 0 else ""
         rating_text = f"⭐ تقييم: {deal['rating']}/5\n" if deal['rating'] else ""
-        old_price_text = f"🏷️ السعر قبل: {deal['old_price']:.2f} ريال\n" if deal['old_price'] > 0 else ""
+        old_price_text = f"🏷️ قبل: {deal['old_price']:.2f} ريال\n" if deal['old_price'] > 0 else ""
         
         message = f"""
 {deal['deal_type']} *[#{i}]*
 
 📦 *{deal['title'][:150]}*
 
-💵 *السعر الآن: {deal['price']:.2f} ريال*
-{old_price_text}{savings_text}🔥 نسبة الخصم: {deal['discount']}%
-{rating_text}📍 المصدر: {deal['source']}
+💵 *الآن: {deal['price']:.2f} ريال*
+{old_price_text}{savings_text}🔥 خصم: {deal['discount']}%
+{rating_text}📍 {deal['category']}
 
-🔗 [افتح في Amazon.sa]({deal['link']})
+🔗 [افتح في Amazon]({deal['link']})
         """
         
         try:
@@ -382,6 +401,10 @@ async def send_deals_to_telegram(deals):
                     text=message,
                     parse_mode='Markdown'
                 )
+            
+            # تأخير 2 ثانية بين كل رسالة عشان مايحظرش Telegram
+            await asyncio.sleep(2)
+            
         except Exception as e:
             logger.error(f"Error sending deal {i}: {e}")
             try:
@@ -390,33 +413,33 @@ async def send_deals_to_telegram(deals):
                     text=message,
                     parse_mode='Markdown'
                 )
+                await asyncio.sleep(2)
             except:
                 pass
 
 # ========== المهمة الرئيسية ==========
 def job():
     logger.info("="*50)
-    logger.info("🔍 بدء البحث عن العروض في Amazon.sa...")
+    logger.info("🔍 بدء البحث...")
     
     try:
         deals = search_amazon_sa_deals()
-        logger.info(f"Raw deals found: {len(deals)}")
+        logger.info(f"Raw: {len(deals)}")
         
-        # طباعة عينة للـ debug
         if deals:
-            sample = deals[:3]
+            sample = deals[:5]
             for d in sample:
-                logger.info(f"Sample: {d['title'][:50]} - {d['price']} ريال - {d['discount']}% off")
+                logger.info(f"Sample: {d['title'][:40]} | {d['price']}ريال | {d['discount']}% | {d['category']}")
         
         filtered = filter_glitch_deals(deals)
         
         import asyncio
         asyncio.run(send_deals_to_telegram(filtered))
         
-        logger.info(f"✅ تم إرسال {len(filtered)} عروض")
+        logger.info(f"✅ Sent {len(filtered)} deals")
         
     except Exception as e:
-        logger.error(f"Error in job: {e}")
+        logger.error(f"Error: {e}")
         import traceback
         logger.error(traceback.format_exc())
 
@@ -424,21 +447,17 @@ def job():
 @app.route('/')
 def home():
     return f"""
-    <h1>🛍️ Amazon SA Glitch Deals Bot</h1>
-    <p>Status: ✅ Running</p>
-    <p>Last scan: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-    <p>Next scan: Every 10 minutes</p>
-    <hr>
-    <a href="/test"><button>🔍 Search Now</button></a>
-    <a href="/status"><button>📊 Status</button></a>
+    <h1>🛍️ Amazon SA Bot</h1>
+    <p>✅ Running</p>
+    <p>Last: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+    <a href="/test"><button>🔍 Search</button></a>
     """
 
 @app.route('/test')
 def test():
     from threading import Thread
-    thread = Thread(target=job)
-    thread.start()
-    return "🔍 Scan started! Check Telegram."
+    Thread(target=job).start()
+    return "🔍 Started!"
 
 @app.route('/status')
 def status():
@@ -450,8 +469,7 @@ if __name__ == "__main__":
     scheduler.add_job(job, 'interval', minutes=10, id='amazon_scan', replace_existing=True)
     scheduler.start()
     
-    logger.info("🤖 البوت اشتغال...")
-    logger.info(f"Chat ID: {TELEGRAM_CHAT_ID}")
+    logger.info("🤖 Bot started")
     
     import threading
     def start_job():
