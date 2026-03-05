@@ -1,0 +1,7 @@
+services:
+  - type: cron
+    name: amazon-deals-bot
+    runtime: python
+    schedule: "*/10 * * * *"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python bot.py"
