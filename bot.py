@@ -51,7 +51,10 @@ def search_amazon_sa_deals():
         "fashion men", 
         "beauty products",
         "makeup",
-        "skin care"
+        "skin care",
+        "perfume",
+        "watches",
+        "handbags"
     ]
     
     headers = {
@@ -66,13 +69,15 @@ def search_amazon_sa_deals():
             
             headers['User-Agent'] = ua.random
             
+            logger.info(f"Searching: {term}")
             response = scraper.get(url, headers=headers, timeout=20)
             
             if response.status_code != 200:
                 logger.warning(f"Status code: {response.status_code} for {term}")
                 continue
             
-            soup = BeautifulSoup(response.content, 'lxml')
+            # ✅ استخدم html.parser بدل lxml
+            soup = BeautifulSoup(response.content, 'html.parser')
             
             # البحث عن المنتجات
             items = soup.find_all('div', {'data-component-type': 's-search-result'})
