@@ -17,7 +17,6 @@ import asyncio
 import hashlib
 import threading
 
-# ========== Logging ==========
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -25,8 +24,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ========== الإعدادات ==========
-TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
-TELEGRAM_CHAT_ID = "432826122"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "432826122")
 
 # ========== المتغيرات العامة ==========
 app = Flask(__name__)
@@ -136,37 +135,96 @@ def search_all_deals():
     all_deals = []
     session = create_session()
     
+    # ===== كل الأقسام (مُحدّثة) =====
     categories = [
+        # 🏆 Best Sellers (أولوية قصوى)
         ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/shoes", "👟 Shoes Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/apparel", "👔 Apparel Best Seller", True),
-        ("https://www.amazon.sa/s?k=adidas&rh=p_8%3A30-99", "👟 Adidas", False),
-        ("https://www.amazon.sa/s?k=nike&rh=p_8%3A30-99", "👟 Nike", False),
-        ("https://www.amazon.sa/s?k=puma&rh=p_8%3A30-99", "👟 Puma", False),
-        ("https://www.amazon.sa/s?k=reebok&rh=p_8%3A30-99", "👟 Reebok", False),
-        ("https://www.amazon.sa/s?k=skechers&rh=p_8%3A30-99", "👟 Skechers", False),
-        ("https://www.amazon.sa/s?k=new+balance&rh=p_8%3A30-99", "👟 New Balance", False),
-        ("https://www.amazon.sa/s?k=under+armour&rh=p_8%3A30-99", "👟 Under Armour", False),
+        ("https://www.amazon.sa/gp/bestsellers/luggage", "🧳 Luggage Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/jewelry", "💎 Jewelry Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/watches", "⌚ Watches Best Seller", True),
+        
+        # 👟 أحذية رياضية
+        ("https://www.amazon.sa/s?k=adidas+shoes&rh=p_8%3A30-99", "👟 Adidas Shoes", False),
+        ("https://www.amazon.sa/s?k=nike+shoes&rh=p_8%3A30-99", "👟 Nike Shoes", False),
+        ("https://www.amazon.sa/s?k=puma+shoes&rh=p_8%3A30-99", "👟 Puma Shoes", False),
+        ("https://www.amazon.sa/s?k=reebok+shoes&rh=p_8%3A30-99", "👟 Reebok Shoes", False),
+        ("https://www.amazon.sa/s?k=skechers+shoes&rh=p_8%3A30-99", "👟 Skechers Shoes", False),
+        ("https://www.amazon.sa/s?k=new+balance+shoes&rh=p_8%3A30-99", "👟 New Balance Shoes", False),
+        ("https://www.amazon.sa/s?k=under+armour+shoes&rh=p_8%3A30-99", "👟 Under Armour Shoes", False),
+        ("https://www.amazon.sa/s?k=asics+shoes&rh=p_8%3A30-99", "👟 Asics Shoes", False),
+        ("https://www.amazon.sa/s?k=vans+shoes&rh=p_8%3A30-99", "👟 Vans Shoes", False),
+        ("https://www.amazon.sa/s?k=converse+shoes&rh=p_8%3A30-99", "👟 Converse Shoes", False),
+        
+        # 👕 ملابس رياضية
+        ("https://www.amazon.sa/s?k=adidas+clothing&rh=p_8%3A30-99", "👕 Adidas Clothing", False),
+        ("https://www.amazon.sa/s?k=nike+clothing&rh=p_8%3A30-99", "👕 Nike Clothing", False),
+        ("https://www.amazon.sa/s?k=puma+clothing&rh=p_8%3A30-99", "👕 Puma Clothing", False),
+        ("https://www.amazon.sa/s?k=under+armour+clothing&rh=p_8%3A30-99", "👕 Under Armour Clothing", False),
+        
+        # 👔 ملابس عصرية
         ("https://www.amazon.sa/s?k=calvin+klein&rh=p_8%3A30-99", "👔 Calvin Klein", False),
         ("https://www.amazon.sa/s?k=tommy+hilfiger&rh=p_8%3A30-99", "👔 Tommy Hilfiger", False),
         ("https://www.amazon.sa/s?k=lacoste&rh=p_8%3A30-99", "🐊 Lacoste", False),
         ("https://www.amazon.sa/s?k=guess&rh=p_8%3A30-99", "👜 Guess", False),
         ("https://www.amazon.sa/s?k=levis&rh=p_8%3A30-99", "👖 Levi's", False),
+        ("https://www.amazon.sa/s?k=wrangler&rh=p_8%3A30-99", "👖 Wrangler", False),
+        ("https://www.amazon.sa/s?k=diesel&rh=p_8%3A30-99", "👖 Diesel", False),
+        ("https://www.amazon.sa/s?k=armani+exchange&rh=p_8%3A30-99", "👔 Armani Exchange", False),
+        ("https://www.amazon.sa/s?k=hugo+boss&rh=p_8%3A30-99", "👔 Hugo Boss", False),
+        ("https://www.amazon.sa/s?", "👔 Hugo Boss", False),
+        ("https://www.amazon.sa/s?k=ralph+lauren&rh=p_8%3A30-99", "👔 Ralph Lauren", False),
+        
+        # ⌚ ساعات
         ("https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99", "⌚ Casio", False),
         ("https://www.amazon.sa/s?k=fossil+watch&rh=p_8%3A30-99", "⌚ Fossil", False),
+        ("https://www.amazon.sa/s?k=g+shock&rh=p_8%3A30-99", "⌚ G-Shock", False),
+        ("https://www.amazon.sa/s?k=timex+watch&rh=p_8%3A30-99", "⌚ Timex", False),
+        ("https://www.amazon.sa/s?k=guess+watch&rh=p_8%3A30-99", "⌚ Guess Watch", False),
+        ("https://www.amazon.sa/s?k=diesel+watch&rh=p_8%3A30-99", "⌚ Diesel Watch", False),
+        
+        # 🕶️ نظارات وإكسسوارات
         ("https://www.amazon.sa/s?k=ray+ban&rh=p_8%3A30-99", "🕶️ Ray Ban", False),
+        ("https://www.amazon.sa/s?k=oakley&rh=p_8%3A30-99", "🕶️ Oakley", False),
+        ("https://www.amazon.sa/s?k=sunglasses&rh=p_8%3A30-99", "🕶️ Sunglasses", False),
+        
+        # 🎒 شنط
+        ("https://www.amazon.sa/s?k=adidas+bag&rh=p_8%3A30-99", "🎒 Adidas Bag", False),
+        ("https://www.amazon.sa/s?k=nike+bag&rh=p_8%3A30-99", "🎒 Nike Bag", False),
+        ("https://www.amazon.sa/s?k=puma+bag&rh=p_8%3A30-99", "🎒 Puma Bag", False),
+        ("https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99", "👜 Handbag", False),
+        ("https://www.amazon.sa/s?k=backpack&rh=p_8%3A30-99", "🎒 Backpack", False),
+        ("https://www.amazon.sa/s?k=samsonite&rh=p_8%3A30-99", "🧳 Samsonite", False),
+        ("https://www.amazon.sa/s?k=american+tourister&rh=p_8%3A30-99", "🧳 American Tourister", False),
+        
+        # 💄 Beauty & Makeup
         ("https://www.amazon.sa/s?k=loreal&rh=p_8%3A30-99", "💄 L'Oreal", False),
         ("https://www.amazon.sa/s?k=maybelline&rh=p_8%3A30-99", "💄 Maybelline", False),
         ("https://www.amazon.sa/s?k=nyx&rh=p_8%3A30-99", "💄 NYX", False),
         ("https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99", "💄 MAC", False),
         ("https://www.amazon.sa/s?k=nivea&rh=p_8%3A30-99", "🧴 Nivea", False),
-        ("https://www.amazon.sa/s?k=adidas+bag&rh=p_8%3A30-99", "🎒 Adidas Bag", False),
-        ("https://www.amazon.sa/s?k=nike+bag&rh=p_8%3A30-99", "🎒 Nike Bag", False),
-        ("https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99", "👜 Handbag", False),
+        ("https://www.amazon.sa/s?k=olay&rh=p_8%3A30-99", "🧴 Olay", False),
+        ("https://www.amazon.sa/s?k=neutrogena&rh=p_8%3A30-99", "🧴 Neutrogena", False),
+        ("https://www.amazon.sa/s?k=the+ordinary&rh=p_8%3A30-99", "🧴 The Ordinary", False),
+        ("https://www.amazon.sa/s?k=revlon&rh=p_8%3A30-99", "💄 Revlon", False),
+        ("https://www.amazon.sa/s?k=bourjois&rh=p_8%3A30-99", "💄 Bourjois", False),
+        ("https://www.amazon.sa/s?k=bobbi+brown&rh=p_8%3A30-99", "💄 Bobbi Brown", False),
+        ("https://www.amazon.sa/s?k=estee+lauder&rh=p_8%3A30-99", "💄 Estee Lauder", False),
+        
+        # 🏠 عطور
+        ("https://www.amazon.sa/s?k=perfume&rh=p_8%3A30-99", "🌸 Perfume", False),
+        ("https://www.amazon.sa/s?k=calvin+klein+perfume&rh=p_8%3A30-99", "🌸 CK Perfume", False),
+        ("https://www.amazon.sa/s?k=hugo+boss+perfume&rh=p_8%3A30-99", "🌸 Hugo Boss Perfume", False),
+        
+        # 🔥 Deals الرسمية
         ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox", False),
         ("https://www.amazon.sa/deals/fashion", "👕 Fashion Deals", False),
         ("https://www.amazon.sa/deals/beauty", "💄 Beauty Deals", False),
+        ("https://www.amazon.sa/deals/shoes", "👟 Shoes Deals", False),
+        ("https://www.amazon.sa/deals/watches", "⌚ Watches Deals", False),
+        ("https://www.amazon.sa/deals/luggage", "🧳 Luggage Deals", False),
     ]
     
     for url, cat_name, is_best_seller in categories:
@@ -438,13 +496,13 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • خصومات ≥ 65% 📉
 • تقييم ≥ 3.5 ⭐  
 • Best Sellers 🔥
-• كل الماركات الكبيرة
+• 50+ قسم مختلف 🛍️
 
 اكتب *Hi* عشان أبدأ البحث!
     """, parse_mode='Markdown')
 
 async def hi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global is_scanning, application
+    global is_scanning
     
     chat_id = update.effective_chat.id
     
@@ -453,7 +511,7 @@ async def hi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     is_scanning = True
-    await update.message.reply_text("🔍 *بدأت البحث في كل الأقسام...*", parse_mode='Markdown')
+    await update.message.reply_text("🔍 *بدأت البحث في 50+ قسم...*\n⏱️ هاياخد 3-5 دقايق", parse_mode='Markdown')
     
     try:
         load_database()
@@ -471,6 +529,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📦 منتجات: {len(sent_products)}
 🔍 بحوث: {len(sent_hashes)}
+📁 أقسام: 50+
 ⏰ {datetime.now().strftime('%H:%M:%S')}
 
 اكتب *Hi* للبحث!
@@ -495,7 +554,8 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @app.route('/')
 def home():
     return f"""
-    <h1>🛍️ Amazon Bot</h1>
+    <h1>🛍️ Amazon Premium Bot</h1>
+    <h3>50+ قسم | ≥65% off | ≥3.5★</h3>
     <p>✅ Running</p>
     <p>Products: {len(sent_products)}</p>
     <p>{datetime.now().strftime('%H:%M:%S')}</p>
@@ -506,7 +566,7 @@ def health():
     return {"status": "ok", "products": len(sent_products)}
 
 # ========== التشغيل ==========
-application = None  # سيتم تعريفه لاحقاً
+application = None
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
@@ -518,22 +578,18 @@ def main():
     load_database()
     logger.info(f"🚀 Starting | Products: {len(sent_products)}")
     
-    # إعداد Telegram Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # Handlers
     application.add_handler(CommandHandler("start", start_cmd))
     application.add_handler(CommandHandler("status", status_cmd))
     application.add_handler(CommandHandler("clear", clear_cmd))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^hi$'), hi_cmd))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
     
-    # تشغيل Flask في thread منفصل
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     logger.info("🌐 Flask started")
     
-    # تشغيل Telegram (blocking)
     logger.info("🤖 Telegram bot starting...")
     application.run_polling(drop_pending_updates=True)
 
