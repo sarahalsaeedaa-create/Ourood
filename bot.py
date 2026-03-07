@@ -8,7 +8,6 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from apscheduler.schedulers.background import BackgroundScheduler
 from flask import Flask
 from fake_useragent import UserAgent
 from difflib import SequenceMatcher
@@ -18,6 +17,7 @@ import asyncio
 import hashlib
 import threading
 
+# ========== Logging ==========
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
@@ -28,13 +28,12 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
 TELEGRAM_CHAT_ID = "432826122"
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
+# ========== المتغيرات العامة ==========
 app = Flask(__name__)
-
 ua = UserAgent()
 sent_products = set()
 sent_hashes = set()
-is_scanning = False  # علامة عشان مايعملش scan مرتين
+is_scanning = False
 
 # ========== قاعدة البيانات ==========
 def load_database():
@@ -45,7 +44,7 @@ def load_database():
                 data = json.load(f)
                 sent_products = set(data.get('ids', []))
                 sent_hashes = set(data.get('hashes', []))
-                logger.info(f"📦 Loaded: {len(sent_products)} IDs, {len(sent_hashes)} hashes")
+                logger.info(f"📦 Loaded: {len(sent_products)} products")
     except Exception as e:
         logger.error(f"Error loading DB: {e}")
 
@@ -354,10 +353,8 @@ def filter_premium_deals(deals):
     return filtered
 
 # ========== الإرسال ==========
-async def send_deals_async(deals, chat_id=None):
+async def send_deals(deals, chat_id):
     global sent_products, sent_hashes, is_scanning
-    
-    target_chat = chat_id or TELEGRAM_CHAT_ID
     
     if not deals:
         msg = """
@@ -366,11 +363,10 @@ async def send_deals_async(deals, chat_id=None):
 المعايير:
 • خصم ≥ 65% 📉
 • تقييم ≥ 3.5 ⭐
-• كل الأقسام 🛍️
 
-جرب تاني بعد شوية!
+جرب تاني بعدين!
         """
-        await bot.send_message(chat_id=target_chat, text=msg, parse_mode='Markdown')
+        await application.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
         is_scanning = False
         return
     
@@ -388,7 +384,7 @@ async def send_deals_async(deals, chat_id=None):
 ⭐ التقييم: ≥ 3.5
 📉 الخصم: ≥ 65%
     """
-    await bot.send_message(chat_id=target_chat, text=summary, parse_mode='Markdown')
+    await application.bot.send_message(chat_id=chat_id, text=summary, parse_mode='Markdown')
     
     for i, d in enumerate(deals, 1):
         savings = f"💵 توفير: {d['savings']:.2f} ريال\n" if d['savings'] > 0 else ""
@@ -410,10 +406,10 @@ async def send_deals_async(deals, chat_id=None):
         
         try:
             if d['image'].startswith('http'):
-                await bot.send_photo(chat_id=target_chat, photo=d['image'], 
-                                   caption=msg, parse_mode='Markdown')
+                await application.bot.send_photo(chat_id=chat_id, photo=d['image'], 
+                                               caption=msg, parse_mode='Markdown')
             else:
-                await bot.send_message(chat_id=target_chat, text=msg, parse_mode='Markdown')
+                await application.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
             
             sent_products.add(d['id'])
             sent_hashes.add(create_title_hash(d['title']))
@@ -422,7 +418,7 @@ async def send_deals_async(deals, chat_id=None):
         except Exception as e:
             logger.error(f"Error #{i}: {e}")
             try:
-                await bot.send_message(chat_id=target_chat, text=msg, parse_mode='Markdown')
+                await application.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
                 sent_products.add(d['id'])
                 sent_hashes.add(create_title_hash(d['title']))
                 await asyncio.sleep(2)
@@ -434,8 +430,7 @@ async def send_deals_async(deals, chat_id=None):
     is_scanning = False
 
 # ========== دوال التلجرام ==========
-async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """رد على /start"""
+async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("""
 👋 *أهلاً بيك في Amazon Premium Bot!*
 
@@ -448,116 +443,99 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 اكتب *Hi* عشان أبدأ البحث!
     """, parse_mode='Markdown')
 
-async def hi_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """رد على Hi"""
-    global is_scanning
+async def hi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global is_scanning, application
+    
+    chat_id = update.effective_chat.id
     
     if is_scanning:
-        await update.message.reply_text("⏳ أنا ببحث دلوقتي... استنى شوية!")
+        await update.message.reply_text("⏳ أنا ببحث دلوقتي... استنى!")
         return
     
     is_scanning = True
-    chat_id = update.effective_chat.id
+    await update.message.reply_text("🔍 *بدأت البحث في كل الأقسام...*", parse_mode='Markdown')
     
-    await update.message.reply_text("🔍 *بدأت البحث...*", parse_mode='Markdown')
-    
-    # تشغيل البحث في thread منفصل
-    def run_search():
-        try:
-            load_database()
-            deals = search_all_deals()
-            premium = filter_premium_deals(deals)
-            
-            # استخدام asyncio.run في thread منفصل
-            asyncio.run(send_deals_async(premium, chat_id))
-            
-        except Exception as e:
-            logger.error(f"Search error: {e}")
-            is_scanning = False
-    
-    threading.Thread(target=run_search).start()
+    try:
+        load_database()
+        deals = search_all_deals()
+        premium = filter_premium_deals(deals)
+        await send_deals(premium, chat_id)
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        await update.message.reply_text("❌ حصل خطأ! جرب تاني.")
+        is_scanning = False
 
-async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """رد على /status"""
+async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"""
-📊 *حالة البوت:*
+📊 *الحالة:*
 
-📦 منتجات مخزنة: {len(sent_products)}
-🔍 عمليات بحث سابقة: {len(sent_hashes)}
-⏱️ آخر تحديث: {datetime.now().strftime('%H:%M:%S')}
+📦 منتجات: {len(sent_products)}
+🔍 بحوث: {len(sent_hashes)}
+⏰ {datetime.now().strftime('%H:%M:%S')}
 
-اكتب *Hi* عشان تبحث تاني!
+اكتب *Hi* للبحث!
     """, parse_mode='Markdown')
 
-async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """مسح القاعدة /clear"""
+async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global sent_products, sent_hashes
     sent_products.clear()
     sent_hashes.clear()
     save_database()
-    await update.message.reply_text("🗑️ *تم مسح القاعدة!*", parse_mode='Markdown')
+    await update.message.reply_text("🗑️ *تم المسح!*", parse_mode='Markdown')
 
-async def unknown_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """رد على أي رسالة غير معروفة"""
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("""
-🤔 مش فاهم...
-
-اكتب:
-• *Hi* - عشان تبحث عن عروض 👈
-• */status* - حالة البوت
-• */start* - المساعدة
+🤔 اكتب:
+• *Hi* - للبحث 👈
+• /status - الحالة
+• /start - المساعدة
     """, parse_mode='Markdown')
 
-# ========== Flask (لـ Render) ==========
+# ========== Flask ==========
 @app.route('/')
 def home():
     return f"""
-    <h1>🛍️ Amazon Premium Bot</h1>
-    <h3>اكتب "Hi" في التلجرام عشان تبحث!</h3>
-    <p>✅ Bot is running</p>
-    <p>📦 Stored: {len(sent_products)} products</p>
-    <p>🕐 {datetime.now().strftime('%H:%M:%S')}</p>
+    <h1>🛍️ Amazon Bot</h1>
+    <p>✅ Running</p>
+    <p>Products: {len(sent_products)}</p>
+    <p>{datetime.now().strftime('%H:%M:%S')}</p>
     """
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    """Webhook endpoint للتلجرام"""
-    # لو حبيت تستخدم webhook بدل polling
-    return "OK"
+@app.route('/health')
+def health():
+    return {"status": "ok", "products": len(sent_products)}
 
-# ========== التشغيل الرئيسي ==========
+# ========== التشغيل ==========
+application = None  # سيتم تعريفه لاحقاً
+
 def run_flask():
-    """تشغيل Flask في thread منفصل"""
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, threaded=True)
 
 def main():
-    """الدالة الرئيسية"""
+    global application
+    
     load_database()
-    logger.info(f"🤖 Starting bot | Stored: {len(sent_products)}")
+    logger.info(f"🚀 Starting | Products: {len(sent_products)}")
     
-    # تشغيل Flask في background
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    # إعداد التلجرام bot
+    # إعداد Telegram Application
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
-    # إضافة handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("status", status_command))
-    application.add_handler(CommandHandler("clear", clear_command))
+    # Handlers
+    application.add_handler(CommandHandler("start", start_cmd))
+    application.add_handler(CommandHandler("status", status_cmd))
+    application.add_handler(CommandHandler("clear", clear_cmd))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^hi$'), hi_cmd))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
     
-    # رد على "Hi" أو "hi" أو "HI"
-    application.add_handler(MessageHandler(filters.Regex(r'(?i)^hi$'), hi_handler))
+    # تشغيل Flask في thread منفصل
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    logger.info("🌐 Flask started")
     
-    # أي رسالة تانية
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_handler))
-    
-    # تشغيل البوت
-    logger.info("✅ Bot is polling...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # تشغيل Telegram (blocking)
+    logger.info("🤖 Telegram bot starting...")
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
