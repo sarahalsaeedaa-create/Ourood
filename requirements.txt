@@ -1,6 +1,7 @@
 python-telegram-bot==20.7
 requests==2.31.0
 beautifulsoup4==4.12.2
+APScheduler==3.10.4  # <-- ضفناها
 flask==3.0.0
 fake-useragent==1.4.0
 cloudscraper==1.2.71
