@@ -290,6 +290,7 @@ async def search_all_deals_async(chat_id, status_message_id):
             if not html:
                 continue
             
+            # ✅ استخدم html.parser بدل lxml
             soup = BeautifulSoup(html, 'html.parser')
             
             items = []
