@@ -23,18 +23,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ========== الإعدادات ==========
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "432826122")
 
-# ========== المتغيرات العامة ==========
 app = Flask(__name__)
 ua = UserAgent()
 sent_products = set()
 sent_hashes = set()
 is_scanning = False
 
-# ========== قاعدة البيانات ==========
 def load_database():
     global sent_products, sent_hashes
     try:
@@ -43,7 +40,7 @@ def load_database():
                 data = json.load(f)
                 sent_products = set(data.get('ids', []))
                 sent_hashes = set(data.get('hashes', []))
-                logger.info(f"📦 Loaded: {len(sent_products)} products")
+                logger.info(f"📦 Loaded: {len(sent_products)}")
     except Exception as e:
         logger.error(f"Error loading DB: {e}")
 
@@ -57,15 +54,10 @@ def save_database():
     except Exception as e:
         logger.error(f"Error saving DB: {e}")
 
-# ========== دوال المساعدة ==========
 def extract_asin(link):
     if not link:
         return None
-    patterns = [
-        r'/dp/([A-Z0-9]{10})',
-        r'/gp/product/([A-Z0-9]{10})',
-        r'product/([A-Z0-9]{10})',
-    ]
+    patterns = [r'/dp/([A-Z0-9]{10})', r'/gp/product/([A-Z0-9]{10})', r'product/([A-Z0-9]{10})']
     for p in patterns:
         match = re.search(p, link, re.I)
         if match:
@@ -78,11 +70,9 @@ def create_title_hash(title):
     clean = re.sub(r'[^\w\s]', '', title.lower())
     clean = re.sub(r'\s+', ' ', clean).strip()
     clean = re.sub(r'\d+', '', clean)
-    stop_words = ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'shipped', 'شحن']
-    for word in stop_words:
+    for word in ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'shipped', 'شحن']:
         clean = clean.replace(word, '')
-    signature = clean[:30].strip()
-    return hashlib.md5(signature.encode()).hexdigest()[:16]
+    return hashlib.md5(clean[:30].strip().encode()).hexdigest()[:16]
 
 def is_similar_product(title):
     new_hash = create_title_hash(title)
@@ -121,93 +111,55 @@ def create_session():
 def fetch_page(session, url):
     for i in range(3):
         try:
-            time.sleep(random.uniform(2, 4))
+            time.sleep(random.uniform(1, 2))  # ✅ أسرع
             r = session.get(url, timeout=25)
             if r.status_code == 200:
                 return r.text
-            time.sleep(3)
+            time.sleep(2)
         except Exception as e:
             logger.warning(f"Attempt {i+1} failed: {e}")
     return None
 
-# ========== البحث ==========
-def search_all_deals():
+# ========== البحث (مُختصر) ==========
+async def search_all_deals_async(chat_id, status_message_id):
     all_deals = []
     session = create_session()
     
+    # ✅ 15 قسم بس (أسرع)
     categories = [
         ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/shoes", "👟 Shoes Best Seller", True),
-        ("https://www.amazon.sa/gp/bestsellers/apparel", "👔 Apparel Best Seller", True),
-        ("https://www.amazon.sa/gp/bestsellers/luggage", "🧳 Luggage Best Seller", True),
-        ("https://www.amazon.sa/gp/bestsellers/jewelry", "💎 Jewelry Best Seller", True),
-        ("https://www.amazon.sa/gp/bestsellers/watches", "⌚ Watches Best Seller", True),
-        ("https://www.amazon.sa/s?k=adidas+shoes&rh=p_8%3A30-99", "👟 Adidas Shoes", False),
-        ("https://www.amazon.sa/s?k=nike+shoes&rh=p_8%3A30-99", "👟 Nike Shoes", False),
-        ("https://www.amazon.sa/s?k=puma+shoes&rh=p_8%3A30-99", "👟 Puma Shoes", False),
-        ("https://www.amazon.sa/s?k=reebok+shoes&rh=p_8%3A30-99", "👟 Reebok Shoes", False),
-        ("https://www.amazon.sa/s?k=skechers+shoes&rh=p_8%3A30-99", "👟 Skechers Shoes", False),
-        ("https://www.amazon.sa/s?k=new+balance+shoes&rh=p_8%3A30-99", "👟 New Balance Shoes", False),
-        ("https://www.amazon.sa/s?k=under+armour+shoes&rh=p_8%3A30-99", "👟 Under Armour Shoes", False),
-        ("https://www.amazon.sa/s?k=asics+shoes&rh=p_8%3A30-99", "👟 Asics Shoes", False),
-        ("https://www.amazon.sa/s?k=vans+shoes&rh=p_8%3A30-99", "👟 Vans Shoes", False),
-        ("https://www.amazon.sa/s?k=converse+shoes&rh=p_8%3A30-99", "👟 Converse Shoes", False),
-        ("https://www.amazon.sa/s?k=adidas+clothing&rh=p_8%3A30-99", "👕 Adidas Clothing", False),
-        ("https://www.amazon.sa/s?k=nike+clothing&rh=p_8%3A30-99", "👕 Nike Clothing", False),
-        ("https://www.amazon.sa/s?k=puma+clothing&rh=p_8%3A30-99", "👕 Puma Clothing", False),
-        ("https://www.amazon.sa/s?k=under+armour+clothing&rh=p_8%3A30-99", "👕 Under Armour Clothing", False),
-        ("https://www.amazon.sa/s?k=calvin+klein&rh=p_8%3A30-99", "👔 Calvin Klein", False),
-        ("https://www.amazon.sa/s?k=tommy+hilfiger&rh=p_8%3A30-_8%3A30-99", "👔 Tommy Hilfiger", False),
-        ("https://www.amazon.sa/s?k=lacoste&rh=p_8%3A30-99", "🐊 Lacoste", False),
-        ("https://www.amazon.sa/s?k=guess&rh=p_8%3A30-99", "👜 Guess", False),
-        ("https://www.amazon.sa/s?k=levis&rh=p_8%3A30-99", "👖 Levi's", False),
-        ("https://www.amazon.sa/s?k=wrangler&rh=p_8%3A30-99", "👖 Wrangler", False),
-        ("https://www.amazon.sa/s?k=diesel&rh=p_8%3A30-99", "👖 Diesel", False),
-        ("https://www.amazon.sa/s?k=armani+exchange&rh=p_8%3A30-99", "👔 Armani Exchange", False),
-        ("https://www.amazon.sa/s?k=hugo+boss&rh=p_8%3A30-99", "👔 Hugo Boss", False),
-        ("https://www.amazon.sa/s?k=ralph+lauren&rh=p_8%3A30-99", "👔 Ralph Lauren", False),
-        ("https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99", "⌚ Casio", False),
-        ("https://www.amazon.sa/s?k=fossil+watch&rh=p_8%3A30-99", "⌚ Fossil", False),
-        ("https://www.amazon.sa/s?k=g+shock&rh=p_8%3A30-99", "⌚ G-Shock", False),
-        ("https://www.amazon.sa/s?k=timex+watch&rh=p_8%3A30-99", "⌚ Timex", False),
-        ("https://www.amazon.sa/s?k=guess+watch&rh=p_8%3A30-99", "⌚ Guess Watch", False),
-        ("https://www.amazon.sa/s?k=diesel+watch&rh=p_8%3A30-99", "⌚ Diesel Watch", False),
-        ("https://www.amazon.sa/s?k=ray+ban&rh=p_8%3A30-99", "🕶️ Ray Ban", False),
-        ("https://www.amazon.sa/s?k=oakley&rh=p_8%3A30-99", "🕶️ Oakley", False),
-        ("https://www.amazon.sa/s?k=sunglasses&rh=p_8%3A30-99", "🕶️ Sunglasses", False),
-        ("https://www.amazon.sa/s?k=adidas+bag&rh=p_8%3A30-99", "🎒 Adidas Bag", False),
-        ("https://www.amazon.sa/s?k=nike+bag&rh=p_8%3A30-99", "🎒 Nike Bag", False),
-        ("https://www.amazon.sa/s?k=puma+bag&rh=p_8%3A30-99", "🎒 Puma Bag", False),
-        ("https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99", "👜 Handbag", False),
-        ("https://www.amazon.sa/s?k=backpack&rh=p_8%3A30-99", "🎒 Backpack", False),
-        ("https://www.amazon.sa/s?k=samsonite&rh=p_8%3A30-99", "🧳 Samsonite", False),
-        ("https://www.amazon.sa/s?k=american+tourister&rh=p_8%3A30-99", "🧳 American Tourister", False),
-        ("https://www.amazon.sa/s?k=loreal&rh=p_8%3A30-99", "💄 L'Oreal", False),
-        ("https://www.amazon.sa/s?k=maybelline&rh=p_8%3A30-99", "💄 Maybelline", False),
-        ("https://www.amazon.sa/s?k=nyx&rh=p_8%3A30-99", "💄 NYX", False),
-        ("https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99", "💄 MAC", False),
-        ("https://www.amazon.sa/s?k=nivea&rh=p_8%3A30-99", "🧴 Nivea", False),
-        ("https://www.amazon.sa/s?k=olay&rh=p_8%3A30-99", "🧴 Olay", False),
-        ("https://www.amazon.sa/s?k=neutrogena&rh=p_8%3A30-99", "🧴 Neutrogena", False),
-        ("https://www.amazon.sa/s?k=the+ordinary&rh=p_8%3A30-99", "🧴 The Ordinary", False),
-        ("https://www.amazon.sa/s?k=revlon&rh=p_8%3A30-99", "💄 Revlon", False),
-        ("https://www.amazon.sa/s?k=bourjois&rh=p_8%3A30-99", "💄 Bourjois", False),
-        ("https://www.amazon.sa/s?k=bobbi+brown&rh=p_8%3A30-99", "💄 Bobbi Brown", False),
-        ("https://www.amazon.sa/s?k=estee+lauder&rh=p_8%3A30-99", "💄 Estee Lauder", False),
-        ("https://www.amazon.sa/s?k=perfume&rh=p_8%3A30-99", "🌸 Perfume", False),
-        ("https://www.amazon.sa/s?k=calvin+klein+perfume&rh=p_8%3A30-99", "🌸 CK Perfume", False),
-        ("https://www.amazon.sa/s?k=hugo+boss+perfume&rh=p_8%3A30-99", "🌸 Hugo Boss Perfume", False),
         ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox", False),
         ("https://www.amazon.sa/deals/fashion", "👕 Fashion Deals", False),
         ("https://www.amazon.sa/deals/beauty", "💄 Beauty Deals", False),
-        ("https://www.amazon.sa/deals/shoes", "👟 Shoes Deals", False),
-        ("https://www.amazon.sa/deals/watches", "⌚ Watches Deals", False),
-        ("https://www.amazon.sa/deals/luggage", "🧳 Luggage Deals", False),
+        ("https://www.amazon.sa/s?k=adidas&rh=p_8%3A30-99", "👟 Adidas", False),
+        ("https://www.amazon.sa/s?k=nike&rh=p_8%3A30-99", "👟 Nike", False),
+        ("https://www.amazon.sa/s?k=calvin+klein&rh=p_8%3A30-99", "👔 Calvin Klein", False),
+        ("https://www.amazon.sa/s?k=lacoste&rh=p_8%3A30-99", "🐊 Lacoste", False),
+        ("https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99", "⌚ Casio", False),
+        ("https://www.amazon.sa/s?k=loreal&rh=p_8%3A30-99", "💄 L'Oreal", False),
+        ("https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99", "👜 Handbag", False),
+        ("https://www.amazon.sa/s?k=perfume&rh=p_8%3A30-99", "🌸 Perfume", False),
+        ("https://www.amazon.sa/gp/bestsellers/watches", "⌚ Watches Best Seller", True),
     ]
     
-    for url, cat_name, is_best_seller in categories:
+    total = len(categories)
+    
+    for idx, (url, cat_name, is_best_seller) in enumerate(categories, 1):
         try:
+            # ✅ تحديث كل 3 أقسام
+            if idx % 3 == 0:
+                progress = f"⏳ جاري البحث... ({idx}/{total})\n📍 {cat_name}"
+                try:
+                    await application.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=status_message_id,
+                        text=progress
+                    )
+                except:
+                    pass
+            
             logger.info(f"🔍 [{cat_name}]")
             html = fetch_page(session, url)
             if not html:
@@ -222,7 +174,6 @@ def search_all_deals():
             
             items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
             items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
-            items.extend(soup.find_all('div', class_='a-section'))
             
             logger.info(f"   Found {len(items)} items")
             
@@ -234,7 +185,7 @@ def search_all_deals():
                 except:
                     continue
             
-            time.sleep(random.uniform(2, 5))
+            time.sleep(random.uniform(1, 2))  # ✅ أسرع
             
         except Exception as e:
             logger.error(f"Error in {cat_name}: {e}")
@@ -283,9 +234,7 @@ def parse_item(item, category, is_best_seller):
                 old_price = price / (1 - discount/100)
     
     title = "Unknown"
-    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', 
-                '.a-size-base-plus', '.p13n-sc-truncated',
-                '[data-testid="product-title"]']:
+    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated']:
         el = item.select_one(sel)
         if el:
             title = el.text.strip()
@@ -343,7 +292,6 @@ def parse_item(item, category, is_best_seller):
         'id': get_product_id({'title': title, 'link': link, 'price': price})
     }
 
-# ========== الفلترة ==========
 def filter_premium_deals(deals):
     filtered = []
     seen_in_run = set()
@@ -365,7 +313,6 @@ def filter_premium_deals(deals):
                 continue
             
             if is_similar_product(title):
-                logger.info(f"🚫 Similar skipped: {title[:40]}")
                 continue
             
             seen_in_run.add(pid)
@@ -380,31 +327,21 @@ def filter_premium_deals(deals):
             deal['savings'] = round(deal['old_price'] - deal['price'], 2) if deal['old_price'] > 0 else 0
             filtered.append(deal)
     
-    filtered.sort(key=lambda x: (
-        0 if x.get('is_best_seller') else 1,
-        0 if x['type'] == '🔥 GLITCH' else 1,
-        -x['discount']
-    ))
-    
-    logger.info(f"🎯 Premium: {len(filtered)}")
+    filtered.sort(key=lambda x: (0 if x.get('is_best_seller') else 1, 0 if x['type'] == '🔥 GLITCH' else 1, -x['discount']))
     return filtered
 
-# ========== الإرسال ==========
-async def send_deals(deals, chat_id):
+async def send_deals(deals, chat_id, status_message_id):
     global sent_products, sent_hashes, is_scanning
     
-    # ✅ تأكد إن is_scanning بيرجع False في كل الأحوال
     try:
+        # حذف رسالة الـ progress
+        try:
+            await application.bot.delete_message(chat_id, status_message_id)
+        except:
+            pass
+        
         if not deals:
-            msg = """
-❌ *لا توجد عروض جديدة*
-
-المعايير:
-• خصم ≥ 65% 📉
-• تقييم ≥ 3.5 ⭐
-
-جرب تاني بعدين!
-            """
+            msg = "❌ *لا توجد عروض جديدة*\n\nجرب تاني بعدين!"
             await application.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
             return
         
@@ -414,13 +351,9 @@ async def send_deals(deals, chat_id):
         summary = f"""
 🎯 *{len(deals)} صفقات ممتازة!*
 
-📊 التفاصيل:
-• ⭐ Best Sellers: {bs}
-• 🔥 Glitch: {glitch}
-• 💰 خصومات 65%+: {len(deals)-bs-glitch}
-
-⭐ التقييم: ≥ 3.5
-📉 الخصم: ≥ 65%
+⭐ Best Sellers: {bs}
+🔥 Glitch: {glitch}
+💰 خصومات 65%+: {len(deals)-bs-glitch}
         """
         await application.bot.send_message(chat_id=chat_id, text=summary, parse_mode='Markdown')
         
@@ -444,22 +377,20 @@ async def send_deals(deals, chat_id):
             
             try:
                 if d['image'].startswith('http'):
-                    await application.bot.send_photo(chat_id=chat_id, photo=d['image'], 
-                                                   caption=msg, parse_mode='Markdown')
+                    await application.bot.send_photo(chat_id=chat_id, photo=d['image'], caption=msg, parse_mode='Markdown')
                 else:
                     await application.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
                 
                 sent_products.add(d['id'])
                 sent_hashes.add(create_title_hash(d['title']))
-                await asyncio.sleep(2)
+                await asyncio.sleep(1.5)  # ✅ أسرع شوية
                 
             except Exception as e:
                 logger.error(f"Error #{i}: {e}")
                 try:
                     await application.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
                     sent_products.add(d['id'])
-                    sent_hashes.add(create_title_hash(d['title']))
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1.5)
                 except:
                     pass
         
@@ -467,21 +398,19 @@ async def send_deals(deals, chat_id):
         logger.info(f"✅ Done! Total: {len(sent_products)}")
         
     finally:
-        # ✅ مهم جداً: رجع is_scanning لـ False حتى لو حصل error
         is_scanning = False
 
 # ========== دوال التلجرام ==========
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("""
-👋 *أهلاً بيك في Amazon Premium Bot!*
+👋 *أهلاً بيك!*
 
 🎯 أنا ببحث عن:
 • خصومات ≥ 65% 📉
 • تقييم ≥ 3.5 ⭐  
-• Best Sellers 🔥
-• 50+ قسم مختلف 🛍️
+• 15 قسم مهم 🛍️
 
-اكتب *Hi* عشان أبدأ البحث!
+اكتب *Hi* عشان أبدأ!
     """, parse_mode='Markdown')
 
 async def hi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -494,17 +423,26 @@ async def hi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     is_scanning = True
-    await update.message.reply_text("🔍 *بدأت البحث في 50+ قسم...*\n⏱️ هاياخد 3-5 دقايق", parse_mode='Markdown')
+    
+    # ✅ رسالة progress
+    status_msg = await update.message.reply_text("🔍 *بدأت البحث...*\n⏱️ دقيقة واحدة", parse_mode='Markdown')
     
     try:
         load_database()
-        deals = search_all_deals()
+        deals = await search_all_deals_async(chat_id, status_msg.message_id)
         premium = filter_premium_deals(deals)
-        await send_deals(premium, chat_id)
+        await send_deals(premium, chat_id, status_msg.message_id)
     except Exception as e:
         logger.error(f"Search error: {e}")
-        await update.message.reply_text("❌ حصل خطأ! جرب تاني.")
         is_scanning = False
+        try:
+            await application.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg.message_id,
+                text="❌ حصل خطأ! جرب تاني."
+            )
+        except:
+            await update.message.reply_text("❌ حصل خطأ! جرب تاني.")
 
 async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"""
@@ -512,10 +450,8 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📦 منتجات: {len(sent_products)}
 🔍 بحوث: {len(sent_hashes)}
-📁 أقسام: 50+
+📁 أقسام: 15
 ⏰ {datetime.now().strftime('%H:%M:%S')}
-
-اكتب *Hi* للبحث!
     """, parse_mode='Markdown')
 
 async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -526,23 +462,12 @@ async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🗑️ *تم المسح!*", parse_mode='Markdown')
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("""
-🤔 اكتب:
-• *Hi* - للبحث 👈
-• /status - الحالة
-• /start - المساعدة
-    """, parse_mode='Markdown')
+    await update.message.reply_text("🤔 اكتب: *Hi* للبحث", parse_mode='Markdown')
 
 # ========== Flask ==========
 @app.route('/')
 def home():
-    return f"""
-    <h1>🛍️ Amazon Premium Bot</h1>
-    <h3>50+ قسم | ≥65% off | ≥3.5★</h3>
-    <p>✅ Running</p>
-    <p>Products: {len(sent_products)}</p>
-    <p>{datetime.now().strftime('%H:%M:%S')}</p>
-    """
+    return f"<h1>🛍️ Amazon Bot</h1><p>Products: {len(sent_products)}</p>"
 
 @app.route('/health')
 def health():
@@ -571,9 +496,8 @@ def main():
     
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-    logger.info("🌐 Flask started")
     
-    logger.info("🤖 Telegram bot starting...")
+    logger.info("🤖 Bot starting...")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
