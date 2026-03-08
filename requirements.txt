@@ -3,3 +3,4 @@ cloudscraper==1.2.71
 beautifulsoup4==4.12.2
 fake-useragent==1.4.0
 requests==2.31.0
+standard-imghdr==3.13.0
