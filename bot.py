@@ -8,7 +8,6 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from telegram import Bot, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from flask import Flask
 from fake_useragent import UserAgent
 from difflib import SequenceMatcher
 import time
@@ -16,6 +15,7 @@ import random
 import asyncio
 import hashlib
 import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "432826122")
+PORT = int(os.environ.get("PORT", 8080))
 
-app = Flask(__name__)
 ua = UserAgent()
 sent_products = set()
 sent_hashes = set()
@@ -589,27 +589,39 @@ async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🤔 اكتب: *Hi* للبحث", parse_mode='Markdown')
 
-# ========== Flask ==========
-@app.route('/')
-def home():
-    return f"<h1>🛍️ Amazon Bot</h1><p>Products: {len(sent_products)}</p>"
+# ========== Health Check Server ==========
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        response = json.dumps({
+            "status": "ok",
+            "products": len(sent_products),
+            "timestamp": datetime.now().isoformat()
+        })
+        self.wfile.write(response.encode())
+    
+    def log_message(self, format, *args):
+        pass  # تقليل الـ logs
 
-@app.route('/health')
-def health():
-    return {"status": "ok", "products": len(sent_products)}
+def run_health_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
+    logger.info(f"🌐 Health server running on port {PORT}")
+    server.serve_forever()
 
 # ========== التشغيل ==========
 application = None
-
-def run_flask():
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, threaded=True)
 
 def main():
     global application
     
     load_database()
     logger.info(f"🚀 Starting | Products: {len(sent_products)}")
+    
+    # تشغيل health check server في thread منفصل
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
     
     application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     
@@ -618,9 +630,6 @@ def main():
     application.add_handler(CommandHandler("clear", clear_cmd))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^hi$'), hi_cmd))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
-    
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
     
     logger.info("🤖 Bot starting...")
     application.run_polling(drop_pending_updates=True)
