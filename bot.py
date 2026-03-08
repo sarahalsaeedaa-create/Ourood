@@ -111,7 +111,7 @@ def create_session():
 def fetch_page(session, url):
     for i in range(3):
         try:
-            time.sleep(random.uniform(1, 2))  # ✅ أسرع
+            time.sleep(random.uniform(1, 2))
             r = session.get(url, timeout=25)
             if r.status_code == 200:
                 return r.text
@@ -125,23 +125,70 @@ async def search_all_deals_async(chat_id, status_message_id):
     all_deals = []
     session = create_session()
     
-    # ✅ 15 قسم بس (أسرع)
+    # ✅ 35 قسم - مبيعات عالية + عمولات ممتازة
     categories = [
+        # 🏆 Best Sellers الأعلى مبيعاً (عمولات ممتازة)
+        ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/watches", "⌚ Watches Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/shoes", "👟 Shoes Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/kitchen", "🍳 Kitchen Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/home", "🏠 Home Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/computers", "💻 Computers Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/mobile", "📱 Mobile Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/perfumes", "🌸 Perfumes Best Seller", True),
+        
+        # 💰 Goldbox & Deals
         ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox", False),
+        ("https://www.amazon.sa/deals/electronics", "📱 Electronics Deals", False),
         ("https://www.amazon.sa/deals/fashion", "👕 Fashion Deals", False),
         ("https://www.amazon.sa/deals/beauty", "💄 Beauty Deals", False),
+        ("https://www.amazon.sa/deals/home", "🏠 Home Deals", False),
+        ("https://www.amazon.sa/deals/kitchen", "🍳 Kitchen Deals", False),
+        ("https://www.amazon.sa/deals/watches", "⌚ Watches Deals", False),
+        ("https://www.amazon.sa/deals/perfumes", "🌸 Perfumes Deals", False),
+        
+        # 🎯 براندات عالية العمولة - إلكترونيات
+        ("https://www.amazon.sa/s?k=apple&rh=p_8%3A30-99", "🍎 Apple", False),
+        ("https://www.amazon.sa/s?k=samsung&rh=p_8%3A30-99", "📱 Samsung", False),
+        ("https://www.amazon.sa/s?k=sony&rh=p_8%3A30-99", "🎧 Sony", False),
+        ("https://www.amazon.sa/s?k=bose&rh=p_8%3A30-99", "🎵 Bose", False),
+        ("https://www.amazon.sa/s?k=anker&rh=p_8%3A30-99", "🔋 Anker", False),
+        ("https://www.amazon.sa/s?k=jbl&rh=p_8%3A30-99", "🎶 JBL", False),
+        
+        # 🎯 براندات عالية العمولة - ساعات
+        ("https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99", "⌚ Casio", False),
+        ("https://www.amazon.sa/s?k=fossil&rh=p_8%3A30-99", "⌚ Fossil", False),
+        ("https://www.amazon.sa/s?k=swatch&rh=p_8%3A30-99", "⌚ Swatch", False),
+        ("https://www.amazon.sa/s?k=smart+watch&rh=p_8%3A30-99", "⌚ Smart Watch", False),
+        
+        # 🎯 براندات عالية العمولة - عطور
+        ("https://www.amazon.sa/s?k=chanel+perfume&rh=p_8%3A30-99", "🌸 Chanel", False),
+        ("https://www.amazon.sa/s?k=dior+perfume&rh=p_8%3A30-99", "🌸 Dior", False),
+        ("https://www.amazon.sa/s?k=gucci+perfume&rh=p_8%3A30-99", "🌸 Gucci", False),
+        ("https://www.amazon.sa/s?k=versace+perfume&rh=p_8%3A30-99", "🌸 Versace", False),
+        ("https://www.amazon.sa/s?k=armani+perfume&rh=p_8%3A30-99", "🌸 Armani", False),
+        
+        # 🎯 براندات عالية العمولة - أزياء
         ("https://www.amazon.sa/s?k=adidas&rh=p_8%3A30-99", "👟 Adidas", False),
         ("https://www.amazon.sa/s?k=nike&rh=p_8%3A30-99", "👟 Nike", False),
         ("https://www.amazon.sa/s?k=calvin+klein&rh=p_8%3A30-99", "👔 Calvin Klein", False),
         ("https://www.amazon.sa/s?k=lacoste&rh=p_8%3A30-99", "🐊 Lacoste", False),
-        ("https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99", "⌚ Casio", False),
+        ("https://www.amazon.sa/s?k=tommy+hilfiger&rh=p_8%3A30-99", "👕 Tommy Hilfiger", False),
+        ("https://www.amazon.sa/s?k=ralph+lauren&rh=p_8%3A30-99", "👔 Ralph Lauren", False),
+        
+        # 🎯 براندات عالية العمولة - مكياج وعناية
         ("https://www.amazon.sa/s?k=loreal&rh=p_8%3A30-99", "💄 L'Oreal", False),
+        ("https://www.amazon.sa/s?k=maybelline&rh=p_8%3A30-99", "💄 Maybelline", False),
+        ("https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99", "💄 MAC", False),
+        ("https://www.amazon.sa/s?k=nyx&rh=p_8%3A30-99", "💄 NYX", False),
+        
+        # 🎯 منتجات عامة مربحة
         ("https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99", "👜 Handbag", False),
-        ("https://www.amazon.sa/s?k=perfume&rh=p_8%3A30-99", "🌸 Perfume", False),
-        ("https://www.amazon.sa/gp/bestsellers/watches", "⌚ Watches Best Seller", True),
+        ("https://www.amazon.sa/s?k=sunglasses&rh=p_8%3A30-99", "🕶️ Sunglasses", False),
+        ("https://www.amazon.sa/s?k=backpack&rh=p_8%3A30-99", "🎒 Backpack", False),
+        ("https://www.amazon.sa/s?k=airpods&rh=p_8%3A30-99", "🎧 AirPods", False),
     ]
     
     total = len(categories)
@@ -185,7 +232,7 @@ async def search_all_deals_async(chat_id, status_message_id):
                 except:
                     continue
             
-            time.sleep(random.uniform(1, 2))  # ✅ أسرع
+            time.sleep(random.uniform(1, 2))
             
         except Exception as e:
             logger.error(f"Error in {cat_name}: {e}")
@@ -383,7 +430,7 @@ async def send_deals(deals, chat_id, status_message_id):
                 
                 sent_products.add(d['id'])
                 sent_hashes.add(create_title_hash(d['title']))
-                await asyncio.sleep(1.5)  # ✅ أسرع شوية
+                await asyncio.sleep(1.5)
                 
             except Exception as e:
                 logger.error(f"Error #{i}: {e}")
@@ -408,7 +455,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎯 أنا ببحث عن:
 • خصومات ≥ 65% 📉
 • تقييم ≥ 3.5 ⭐  
-• 15 قسم مهم 🛍️
+• 35 قسم مهم 🛍️
 
 اكتب *Hi* عشان أبدأ!
     """, parse_mode='Markdown')
@@ -425,7 +472,7 @@ async def hi_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     is_scanning = True
     
     # ✅ رسالة progress
-    status_msg = await update.message.reply_text("🔍 *بدأت البحث...*\n⏱️ دقيقة واحدة", parse_mode='Markdown')
+    status_msg = await update.message.reply_text("🔍 *بدأت البحث...*\n⏱️ 2-3 دقائق", parse_mode='Markdown')
     
     try:
         load_database()
@@ -450,7 +497,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📦 منتجات: {len(sent_products)}
 🔍 بحوث: {len(sent_hashes)}
-📁 أقسام: 15
+📁 أقسام: 35
 ⏰ {datetime.now().strftime('%H:%M:%S')}
     """, parse_mode='Markdown')
 
