@@ -120,11 +120,14 @@ def fetch_page(session, url):
             logger.warning(f"Attempt {i+1} failed: {e}")
     return None
 
+# ========== البحث ==========
 def search_all_deals(chat_id, status_message_id):
     all_deals = []
     session = create_session()
     
+    # ✅ 120+ قسم - عروض مخفية + مبيعات عالية + عمولات ممتازة
     categories = [
+        # 🏆 Best Sellers الأعلى مبيعاً
         ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", True),
@@ -145,6 +148,13 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/gp/bestsellers/jewelry", "💎 Jewelry Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/luggage", "🧳 Luggage Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/pet", "🐾 Pet Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/office", "📎 Office Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/personal-care", "🧴 Personal Care Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/health", "💊 Health Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/video-games", "🎮 Games Best Seller", True),
+        ("https://www.amazon.sa/gp/bestsellers/camera", "📷 Camera Best Seller", True),
+        
+        # 💰 Goldbox & Deals الرسمية
         ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox", False),
         ("https://www.amazon.sa/deals/electronics", "📱 Electronics Deals", False),
         ("https://www.amazon.sa/deals/fashion", "👕 Fashion Deals", False),
@@ -159,6 +169,39 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/deals/grocery", "🛒 Grocery Deals", False),
         ("https://www.amazon.sa/deals/automotive", "🚗 Automotive Deals", False),
         ("https://www.amazon.sa/deals/tools", "🔧 Tools Deals", False),
+        ("https://www.amazon.sa/deals/office", "📎 Office Deals", False),
+        ("https://www.amazon.sa/deals/books", "📚 Books Deals", False),
+        
+        # 🔥 عروض مخفية - Warehouse Deals
+        ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse Deals", False),
+        ("https://www.amazon.sa/gp/warehouse-deals/electronics", "🏭 Warehouse Electronics", False),
+        ("https://www.amazon.sa/gp/warehouse-deals/fashion", "🏭 Warehouse Fashion", False),
+        ("https://www.amazon.sa/gp/warehouse-deals/home", "🏭 Warehouse Home", False),
+        ("https://www.amazon.sa/gp/warehouse-deals/kitchen", "🏭 Warehouse Kitchen", False),
+        
+        # 🎯 عروض مخفية - Coupons
+        ("https://www.amazon.sa/gp/coupons", "🎟️ Coupons", False),
+        ("https://www.amazon.sa/gp/coupons/electronics", "🎟️ Electronics Coupons", False),
+        ("https://www.amazon.sa/gp/coupons/fashion", "🎟️ Fashion Coupons", False),
+        ("https://www.amazon.sa/gp/coupons/home", "🎟️ Home Coupons", False),
+        ("https://www.amazon.sa/gp/coupons/beauty", "🎟️ Beauty Coupons", False),
+        
+        # 💎 عروض مخفية - Prime Exclusive
+        ("https://www.amazon.sa/gp/prime/pipeline/prime_exclusives", "👑 Prime Exclusives", False),
+        ("https://www.amazon.sa/gp/prime/pipeline/lightning_deals", "⚡ Lightning Deals", False),
+        
+        # 🏷️ عروض مخفية - Today's Deals
+        ("https://www.amazon.sa/gp/todays-deals", "📅 Today Deals", False),
+        ("https://www.amazon.sa/gp/todays-deals/electronics", "📅 Today Electronics", False),
+        ("https://www.amazon.sa/gp/todays-deals/fashion", "📅 Today Fashion", False),
+        
+        # 🎁 عروض مخفية - Outlet
+        ("https://www.amazon.sa/outlet", "🎁 Outlet", False),
+        ("https://www.amazon.sa/outlet/electronics", "🎁 Outlet Electronics", False),
+        ("https://www.amazon.sa/outlet/home", "🎁 Outlet Home", False),
+        ("https://www.amazon.sa/outlet/fashion", "🎁 Outlet Fashion", False),
+        
+        # 🎯 براندات عالية العمولة - إلكترونيات
         ("https://www.amazon.sa/s?k=apple&rh=p_8%3A30-99", "🍎 Apple", False),
         ("https://www.amazon.sa/s?k=samsung&rh=p_8%3A30-99", "📱 Samsung", False),
         ("https://www.amazon.sa/s?k=sony&rh=p_8%3A30-99", "🎧 Sony", False),
@@ -174,12 +217,21 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/s?k=logitech&rh=p_8%3A30-99", "🖱️ Logitech", False),
         ("https://www.amazon.sa/s?k=canon&rh=p_8%3A30-99", "📷 Canon", False),
         ("https://www.amazon.sa/s?k=nikon&rh=p_8%3A30-99", "📷 Nikon", False),
+        ("https://www.amazon.sa/s?k=playstation&rh=p_8%3A30-99", "🎮 PlayStation", False),
+        ("https://www.amazon.sa/s?k=xbox&rh=p_8%3A30-99", "🎮 Xbox", False),
+        ("https://www.amazon.sa/s?k=nintendo&rh=p_8%3A30-99", "🎮 Nintendo", False),
+        
+        # 🎯 براندات عالية العمولة - ساعات
         ("https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99", "⌚ Casio", False),
         ("https://www.amazon.sa/s?k=fossil&rh=p_8%3A30-99", "⌚ Fossil", False),
         ("https://www.amazon.sa/s?k=swatch&rh=p_8%3A30-99", "⌚ Swatch", False),
         ("https://www.amazon.sa/s?k=smart+watch&rh=p_8%3A30-99", "⌚ Smart Watch", False),
         ("https://www.amazon.sa/s?k=rolex&rh=p_8%3A30-99", "⌚ Rolex", False),
         ("https://www.amazon.sa/s?k=michael+kors&rh=p_8%3A30-99", "⌚ Michael Kors", False),
+        ("https://www.amazon.sa/s?k=apple+watch&rh=p_8%3A30-99", "⌚ Apple Watch", False),
+        ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "⌚ Galaxy Watch", False),
+        
+        # 🎯 براندات عالية العمولة - عطور
         ("https://www.amazon.sa/s?k=chanel+perfume&rh=p_8%3A30-99", "🌸 Chanel", False),
         ("https://www.amazon.sa/s?k=dior+perfume&rh=p_8%3A30-99", "🌸 Dior", False),
         ("https://www.amazon.sa/s?k=gucci+perfume&rh=p_8%3A30-99", "🌸 Gucci", False),
@@ -188,6 +240,10 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/s?k=prada+perfume&rh=p_8%3A30-99", "🌸 Prada", False),
         ("https://www.amazon.sa/s?k=burberry+perfume&rh=p_8%3A30-99", "🌸 Burberry", False),
         ("https://www.amazon.sa/s?k=calvin+klein+perfume&rh=p_8%3A30-99", "🌸 CK Perfume", False),
+        ("https://www.amazon.sa/s?k=tom+ford+perfume&rh=p_8%3A30-99", "🌸 Tom Ford", False),
+        ("https://www.amazon.sa/s?k=yves+saint+laurent+perfume&rh=p_8%3A30-99", "🌸 YSL", False),
+        
+        # 🎯 براندات عالية العمولة - أزياء
         ("https://www.amazon.sa/s?k=adidas&rh=p_8%3A30-99", "👟 Adidas", False),
         ("https://www.amazon.sa/s?k=nike&rh=p_8%3A30-99", "👟 Nike", False),
         ("https://www.amazon.sa/s?k=calvin+klein&rh=p_8%3A30-99", "👔 Calvin Klein", False),
@@ -199,6 +255,11 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/s?k=under+armour&rh=p_8%3A30-99", "👟 Under Armour", False),
         ("https://www.amazon.sa/s?k=levis&rh=p_8%3A30-99", "👖 Levis", False),
         ("https://www.amazon.sa/s?k=wrangler&rh=p_8%3A30-99", "👖 Wrangler", False),
+        ("https://www.amazon.sa/s?k=timberland&rh=p_8%3A30-99", "👢 Timberland", False),
+        ("https://www.amazon.sa/s?k=skechers&rh=p_8%3A30-99", "👟 Skechers", False),
+        ("https://www.amazon.sa/s?k=new+balance&rh=p_8%3A30-99", "👟 New Balance", False),
+        
+        # 🎯 براندات عالية العمولة - مكياج وعناية
         ("https://www.amazon.sa/s?k=loreal&rh=p_8%3A30-99", "💄 L'Oreal", False),
         ("https://www.amazon.sa/s?k=maybelline&rh=p_8%3A30-99", "💄 Maybelline", False),
         ("https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99", "💄 MAC", False),
@@ -209,22 +270,39 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/s?k=nivea&rh=p_8%3A30-99", "💆 Nivea", False),
         ("https://www.amazon.sa/s?k=dove&rh=p_8%3A30-99", "🧼 Dove", False),
         ("https://www.amazon.sa/s?k=pantene&rh=p_8%3A30-99", "💇 Pantene", False),
+        ("https://www.amazon.sa/s?k=kerastase&rh=p_8%3A30-99", "💇 Kerastase", False),
+        ("https://www.amazon.sa/s?k=the+ordinary&rh=p_8%3A30-99", "💆 The Ordinary", False),
+        
+        # 🎯 منتجات الأطفال (مبيعات عالية)
         ("https://www.amazon.sa/s?k=pampers&rh=p_8%3A30-99", "👶 Pampers", False),
         ("https://www.amazon.sa/s?k=johnson+baby&rh=p_8%3A30-99", "👶 Johnson's", False),
         ("https://www.amazon.sa/s?k=lego&rh=p_8%3A30-99", "🧱 LEGO", False),
         ("https://www.amazon.sa/s?k=barbie&rh=p_8%3A30-99", "👸 Barbie", False),
         ("https://www.amazon.sa/s?k=hot+wheels&rh=p_8%3A30-99", "🚗 Hot Wheels", False),
         ("https://www.amazon.sa/s?k=fisher+price&rh=p_8%3A30-99", "🎠 Fisher Price", False),
+        ("https://www.amazon.sa/s?k=ninjago&rh=p_8%3A30-99", "🥷 Ninjago", False),
+        ("https://www.amazon.sa/s?k=play-doh&rh=p_8%3A30-99", "🎨 Play-Doh", False),
+        
+        # 🎯 رياضة ولياقة
         ("https://www.amazon.sa/s?k=fitness+equipment&rh=p_8%3A30-99", "🏋️ Fitness Equipment", False),
         ("https://www.amazon.sa/s?k=yoga+mat&rh=p_8%3A30-99", "🧘 Yoga Mat", False),
         ("https://www.amazon.sa/s?k=dumbbells&rh=p_8%3A30-99", "🏋️ Dumbbells", False),
         ("https://www.amazon.sa/s?k=running+shoes&rh=p_8%3A30-99", "👟 Running Shoes", False),
         ("https://www.amazon.sa/s?k=cycling&rh=p_8%3A30-99", "🚴 Cycling", False),
+        ("https://www.amazon.sa/s?k=treadmill&rh=p_8%3A30-99", "🏃 Treadmill", False),
+        ("https://www.amazon.sa/s?k=protein&rh=p_8%3A30-99", "💪 Protein", False),
+        
+        # 🎯 منزل ومطبخ
         ("https://www.amazon.sa/s?k=philips&rh=p_8%3A30-99", "🏠 Philips", False),
         ("https://www.amazon.sa/s?k=braun&rh=p_8%3A30-99", "🏠 Braun", False),
         ("https://www.amazon.sa/s?k=tupperware&rh=p_8%3A30-99", "🥣 Tupperware", False),
         ("https://www.amazon.sa/s?k=pyrex&rh=p_8%3A30-99", "🍽️ Pyrex", False),
         ("https://www.amazon.sa/s?k=ninja+blender&rh=p_8%3A30-99", "🥤 Ninja", False),
+        ("https://www.amazon.sa/s?k=dyson&rh=p_8%3A30-99", "🏠 Dyson", False),
+        ("https://www.amazon.sa/s?k=nespresso&rh=p_8%3A30-99", "☕ Nespresso", False),
+        ("https://www.amazon.sa/s?k=delonghi&rh=p_8%3A30-99", "☕ DeLonghi", False),
+        
+        # 🎯 اكسسوارات ومجوهرات
         ("https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99", "👜 Handbag", False),
         ("https://www.amazon.sa/s?k=sunglasses&rh=p_8%3A30-99", "🕶️ Sunglasses", False),
         ("https://www.amazon.sa/s?k=backpack&rh=p_8%3A30-99", "🎒 Backpack", False),
@@ -233,13 +311,35 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/s?k=oakley&rh=p_8%3A30-99", "🕶️ Oakley", False),
         ("https://www.amazon.sa/s?k=swarovski&rh=p_8%3A30-99", "💎 Swarovski", False),
         ("https://www.amazon.sa/s?k=pandora&rh=p_8%3A30-99", "💎 Pandora", False),
+        ("https://www.amazon.sa/s?k=cartier&rh=p_8%3A30-99", "💎 Cartier", False),
+        
+        # 🎯 أدوات وتحسين المنزل
         ("https://www.amazon.sa/s?k=bosch+tools&rh=p_8%3A30-99", "🔧 Bosch", False),
         ("https://www.amazon.sa/s?k=makita&rh=p_8%3A30-99", "🔧 Makita", False),
         ("https://www.amazon.sa/s?k=dewalt&rh=p_8%3A30-99", "🔧 DeWalt", False),
         ("https://www.amazon.sa/s?k=black+decker&rh=p_8%3A30-99", "🔧 Black & Decker", False),
+        ("https://www.amazon.sa/s?k=stanley&rh=p_8%3A30-99", "🔧 Stanley", False),
+        
+        # 🎯 أقسام خاصة بالسعودية
         ("https://www.amazon.sa/s?k=dates&rh=p_8%3A30-99", "🌴 Dates", False),
         ("https://www.amazon.sa/s?k=oud&rh=p_8%3A30-99", "🌿 Oud", False),
         ("https://www.amazon.sa/s?k=prayer+mat&rh=p_8%3A30-99", "🕌 Prayer Mat", False),
+        ("https://www.amazon.sa/s?k=ramadan&rh=p_8%3A30-99", "🌙 Ramadan", False),
+        ("https://www.amazon.sa/s?k=eid&rh=p_8%3A30-99", "🎉 Eid", False),
+        
+        # 🔥 عروض سرية - Hidden Deals
+        ("https://www.amazon.sa/s?k=clearance&rh=p_8%3A50-99", "🔥 Clearance", False),
+        ("https://www.amazon.sa/s?k=last+chance&rh=p_8%3A50-99", "🔥 Last Chance", False),
+        ("https://www.amazon.sa/s?k=final+sale&rh=p_8%3A50-99", "🔥 Final Sale", False),
+        ("https://www.amazon.sa/s?k=limited+time&rh=p_8%3A50-99", "⏰ Limited Time", False),
+        ("https://www.amazon.sa/s?k=flash+sale&rh=p_8%3A50-99", "⚡ Flash Sale", False),
+        
+        # 💎 منتجات فاخرة - Luxury
+        ("https://www.amazon.sa/s?k=louis+vuitton&rh=p_8%3A30-99", "👜 LV", False),
+        ("https://www.amazon.sa/s?k=hermes&rh=p_8%3A30-99", "👜 Hermes", False),
+        ("https://www.amazon.sa/s?k=coach&rh=p_8%3A30-99", "👜 Coach", False),
+        ("https://www.amazon.sa/s?k=kate+spade&rh=p_8%3A30-99", "👜 Kate Spade", False),
+        ("https://www.amazon.sa/s?k=tiffany&rh=p_8%3A30-99", "💍 Tiffany", False),
     ]
     
     total = len(categories)
@@ -271,6 +371,8 @@ def search_all_deals(chat_id, status_message_id):
             
             items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
             items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
+            items.extend(soup.find_all('div', class_='s-result-item'))
+            items.extend(soup.find_all('div', class_='a-section'))
             
             logger.info(f"   Found {len(items)} items")
             
@@ -292,7 +394,7 @@ def search_all_deals(chat_id, status_message_id):
 
 def parse_item(item, category, is_best_seller):
     price = None
-    for sel in ['.a-price-whole', '.a-price .a-offscreen']:
+    for sel in ['.a-price-whole', '.a-price .a-offscreen', '.a-price-range', '.a-price']:
         el = item.select_one(sel)
         if el:
             try:
@@ -331,7 +433,7 @@ def parse_item(item, category, is_best_seller):
                 old_price = price / (1 - discount/100)
     
     title = "Unknown"
-    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated']:
+    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated', '.a-size-medium']:
         el = item.select_one(sel)
         if el:
             title = el.text.strip()
@@ -352,10 +454,10 @@ def parse_item(item, category, is_best_seller):
                 link = f"https://www.amazon.sa/dp/{asin}"
     
     img = ""
-    for sel in ['img.s-image', 'img[src]']:
+    for sel in ['img.s-image', 'img[src]', '.s-image']:
         el = item.select_one(sel)
         if el:
-            img = el.get('src', '') or el.get('data-src', '')
+            img = el.get('src', '') or el.get('data-src', '') or el.get('data-lazy-src', '')
             if img.startswith('http'):
                 break
     
@@ -400,10 +502,12 @@ def filter_premium_deals(deals):
         pid = deal['id']
         title = deal['title']
         
-        min_discount = 60 if is_bs else 65
+        # تخفيض الحد الأدنى للعروض المخفية
+        min_discount = 50 if 'Warehouse' in deal['category'] or 'Outlet' in deal['category'] or 'Clearance' in deal['category'] else (60 if is_bs else 65)
+        
         has_discount = disc >= min_discount
-        has_rating = rating >= 3.5
-        is_reasonable = 0.5 < deal['price'] < 5000
+        has_rating = rating >= 3.0
+        is_reasonable = 0.5 < deal['price'] < 8000
         
         if has_discount and has_rating and is_reasonable:
             if pid in sent_products or pid in seen_in_run:
@@ -416,6 +520,16 @@ def filter_premium_deals(deals):
             
             if deal['price'] < 1:
                 deal['type'] = '🔥 GLITCH'
+            elif 'Warehouse' in deal['category']:
+                deal['type'] = '🏭 WAREHOUSE'
+            elif 'Outlet' in deal['category']:
+                deal['type'] = '🎁 OUTLET'
+            elif 'Coupon' in deal['category']:
+                deal['type'] = '🎟️ COUPON'
+            elif 'Prime' in deal['category']:
+                deal['type'] = '👑 PRIME'
+            elif 'Lightning' in deal['category']:
+                deal['type'] = '⚡ LIGHTNING'
             elif is_bs:
                 deal['type'] = '⭐ BEST SELLER'
             else:
@@ -424,7 +538,13 @@ def filter_premium_deals(deals):
             deal['savings'] = round(deal['old_price'] - deal['price'], 2) if deal['old_price'] > 0 else 0
             filtered.append(deal)
     
-    filtered.sort(key=lambda x: (0 if x.get('is_best_seller') else 1, 0 if x['type'] == '🔥 GLITCH' else 1, -x['discount']))
+    filtered.sort(key=lambda x: (
+        0 if x['type'] == '🔥 GLITCH' else 1,
+        0 if x['type'] == '🏭 WAREHOUSE' else 1,
+        0 if x['type'] == '⚡ LIGHTNING' else 1,
+        0 if x.get('is_best_seller') else 1,
+        -x['discount']
+    ))
     return filtered
 
 def send_deals(deals, chat_id, status_message_id):
@@ -443,13 +563,19 @@ def send_deals(deals, chat_id, status_message_id):
         
         bs = sum(1 for d in deals if d.get('is_best_seller'))
         glitch = sum(1 for d in deals if d['type'] == '🔥 GLITCH')
+        warehouse = sum(1 for d in deals if d['type'] == '🏭 WAREHOUSE')
+        outlet = sum(1 for d in deals if d['type'] == '🎁 OUTLET')
+        lightning = sum(1 for d in deals if d['type'] == '⚡ LIGHTNING')
         
         summary = f"""
-🎯 *{len(deals)} صفقات ممتازة!*
+🎯 *{len(deals)} صفقة ممتازة!*
 
-⭐ Best Sellers: {bs}
 🔥 Glitch: {glitch}
-💰 خصومات 65%+: {len(deals)-bs-glitch}
+🏭 Warehouse: {warehouse}
+🎁 Outlet: {outlet}
+⚡ Lightning: {lightning}
+⭐ Best Sellers: {bs}
+💰 خصومات عادية: {len(deals)-bs-glitch-warehouse-outlet-lightning}
         """
         updater.bot.send_message(chat_id=chat_id, text=summary, parse_mode='Markdown')
         
@@ -498,14 +624,19 @@ def send_deals(deals, chat_id, status_message_id):
 
 def start_cmd(update: Update, context: CallbackContext):
     update.message.reply_text("""
-👋 *أهلاً بيك!*
+👋 *أهلاً بيك في Amazon Deals Bot!*
 
-🎯 أنا ببحث عن:
-• خصومات ≥ 65% 📉
-• تقييم ≥ 3.5 ⭐  
-• 65 قسم مهم 🛍️
+🎯 أنا ببحث في:
+• 120+ قسم شامل 📁
+• عروض Warehouse المخفية 🏭
+• Outlet & Clearance 🎁
+• Lightning Deals ⚡
+• Prime Exclusives 👑
+• Best Sellers ⭐
 
-اكتب *Hi* عشان أبدأ!
+🔥 خصومات من 50% لـ 99%!
+
+اكتب *Hi* عشان تبدأ البحث!
     """, parse_mode='Markdown')
 
 def hi_cmd(update: Update, context: CallbackContext):
@@ -514,12 +645,12 @@ def hi_cmd(update: Update, context: CallbackContext):
     chat_id = update.effective_chat.id
     
     if is_scanning:
-        update.message.reply_text("⏳ أنا ببحث دلوقتي... استنى!")
+        update.message.reply_text("⏳ أنا ببحث دلوقتي... استنى شوية!")
         return
     
     is_scanning = True
     
-    status_msg = update.message.reply_text("🔍 *بدأت البحث...*\n⏱️ 3-4 دقائق", parse_mode='Markdown')
+    status_msg = update.message.reply_text("🔍 *بدأت البحث في 120+ قسم...*\n⏱️ 4-5 دقائق", parse_mode='Markdown')
     
     try:
         load_database()
@@ -540,12 +671,14 @@ def hi_cmd(update: Update, context: CallbackContext):
 
 def status_cmd(update: Update, context: CallbackContext):
     update.message.reply_text(f"""
-📊 *الحالة:*
+📊 *حالة البوت:*
 
-📦 منتجات: {len(sent_products)}
-🔍 بحوث: {len(sent_hashes)}
-📁 أقسام: 65
-⏰ {datetime.now().strftime('%H:%M:%S')}
+📦 منتجات مخزنة: {len(sent_products)}
+🔍 بحوث متنوعة: {len(sent_hashes)}
+📁 الأقسام: 120+
+⏰ التوقيت: {datetime.now().strftime('%H:%M:%S')}
+
+✅ البوت شغال بكفاءة!
     """, parse_mode='Markdown')
 
 def clear_cmd(update: Update, context: CallbackContext):
@@ -553,10 +686,10 @@ def clear_cmd(update: Update, context: CallbackContext):
     sent_products.clear()
     sent_hashes.clear()
     save_database()
-    update.message.reply_text("🗑️ *تم المسح!*", parse_mode='Markdown')
+    update.message.reply_text("🗑️ *تم مسح كل البيانات!*\n\nالآن البوت هيبدأ من جديد.", parse_mode='Markdown')
 
 def unknown(update: Update, context: CallbackContext):
-    update.message.reply_text("🤔 اكتب: *Hi* للبحث", parse_mode='Markdown')
+    update.message.reply_text("🤔 *مش فاهم!*\n\nاكتب:\n• *Hi* للبحث عن عروض\n• /start للمساعدة\n• /status للحالة", parse_mode='Markdown')
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -566,7 +699,8 @@ class HealthHandler(BaseHTTPRequestHandler):
         response = json.dumps({
             "status": "ok",
             "products": len(sent_products),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            "categories": 120
         })
         self.wfile.write(response.encode())
     
