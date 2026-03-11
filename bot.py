@@ -125,9 +125,9 @@ def search_all_deals(chat_id, status_message_id):
     all_deals = []
     session = create_session()
     
-    # ✅ 120+ قسم - عروض مخفية + مبيعات عالية + عمولات ممتازة
+    # ✅ 200+ قسم شامل
     categories = [
-        # 🏆 Best Sellers الأعلى مبيعاً
+        # 🏆 Best Sellers الأساسية
         ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", True),
         ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", True),
@@ -178,60 +178,117 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/gp/warehouse-deals/fashion", "🏭 Warehouse Fashion", False),
         ("https://www.amazon.sa/gp/warehouse-deals/home", "🏭 Warehouse Home", False),
         ("https://www.amazon.sa/gp/warehouse-deals/kitchen", "🏭 Warehouse Kitchen", False),
+        ("https://www.amazon.sa/gp/warehouse-deals/beauty", "🏭 Warehouse Beauty", False),
+        ("https://www.amazon.sa/gp/warehouse-deals/sports", "🏭 Warehouse Sports", False),
+        ("https://www.amazon.sa/gp/warehouse-deals/tools", "🏭 Warehouse Tools", False),
         
-        # 🎯 عروض مخفية - Coupons
+        # 🎟️ عروض مخفية - Coupons
         ("https://www.amazon.sa/gp/coupons", "🎟️ Coupons", False),
         ("https://www.amazon.sa/gp/coupons/electronics", "🎟️ Electronics Coupons", False),
         ("https://www.amazon.sa/gp/coupons/fashion", "🎟️ Fashion Coupons", False),
         ("https://www.amazon.sa/gp/coupons/home", "🎟️ Home Coupons", False),
         ("https://www.amazon.sa/gp/coupons/beauty", "🎟️ Beauty Coupons", False),
+        ("https://www.amazon.sa/gp/coupons/grocery", "🎟️ Grocery Coupons", False),
+        ("https://www.amazon.sa/gp/coupons/baby", "🎟️ Baby Coupons", False),
         
-        # 💎 عروض مخفية - Prime Exclusive
+        # 👑 Prime & Lightning
         ("https://www.amazon.sa/gp/prime/pipeline/prime_exclusives", "👑 Prime Exclusives", False),
         ("https://www.amazon.sa/gp/prime/pipeline/lightning_deals", "⚡ Lightning Deals", False),
         
-        # 🏷️ عروض مخفية - Today's Deals
+        # 📅 Today's Deals
         ("https://www.amazon.sa/gp/todays-deals", "📅 Today Deals", False),
         ("https://www.amazon.sa/gp/todays-deals/electronics", "📅 Today Electronics", False),
         ("https://www.amazon.sa/gp/todays-deals/fashion", "📅 Today Fashion", False),
+        ("https://www.amazon.sa/gp/todays-deals/home", "📅 Today Home", False),
+        ("https://www.amazon.sa/gp/todays-deals/beauty", "📅 Today Beauty", False),
         
-        # 🎁 عروض مخفية - Outlet
+        # 🎁 Outlet
         ("https://www.amazon.sa/outlet", "🎁 Outlet", False),
         ("https://www.amazon.sa/outlet/electronics", "🎁 Outlet Electronics", False),
         ("https://www.amazon.sa/outlet/home", "🎁 Outlet Home", False),
         ("https://www.amazon.sa/outlet/fashion", "🎁 Outlet Fashion", False),
+        ("https://www.amazon.sa/outlet/beauty", "🎁 Outlet Beauty", False),
         
-        # 🎯 براندات عالية العمولة - إلكترونيات
-        ("https://www.amazon.sa/s?k=apple&rh=p_8%3A30-99", "🍎 Apple", False),
-        ("https://www.amazon.sa/s?k=samsung&rh=p_8%3A30-99", "📱 Samsung", False),
-        ("https://www.amazon.sa/s?k=sony&rh=p_8%3A30-99", "🎧 Sony", False),
-        ("https://www.amazon.sa/s?k=bose&rh=p_8%3A30-99", "🎵 Bose", False),
-        ("https://www.amazon.sa/s?k=anker&rh=p_8%3A30-99", "🔋 Anker", False),
-        ("https://www.amazon.sa/s?k=jbl&rh=p_8%3A30-99", "🎶 JBL", False),
-        ("https://www.amazon.sa/s?k=beats&rh=p_8%3A30-99", "🎧 Beats", False),
-        ("https://www.amazon.sa/s?k=xiaomi&rh=p_8%3A30-99", "📱 Xiaomi", False),
-        ("https://www.amazon.sa/s?k=huawei&rh=p_8%3A30-99", "📱 Huawei", False),
-        ("https://www.amazon.sa/s?k=lenovo&rh=p_8%3A30-99", "💻 Lenovo", False),
-        ("https://www.amazon.sa/s?k=hp&rh=p_8%3A30-99", "💻 HP", False),
-        ("https://www.amazon.sa/s?k=dell&rh=p_8%3A30-99", "💻 Dell", False),
-        ("https://www.amazon.sa/s?k=logitech&rh=p_8%3A30-99", "🖱️ Logitech", False),
-        ("https://www.amazon.sa/s?k=canon&rh=p_8%3A30-99", "📷 Canon", False),
-        ("https://www.amazon.sa/s?k=nikon&rh=p_8%3A30-99", "📷 Nikon", False),
-        ("https://www.amazon.sa/s?k=playstation&rh=p_8%3A30-99", "🎮 PlayStation", False),
-        ("https://www.amazon.sa/s?k=xbox&rh=p_8%3A30-99", "🎮 Xbox", False),
-        ("https://www.amazon.sa/s?k=nintendo&rh=p_8%3A30-99", "🎮 Nintendo", False),
+        # 🔥 عروض سرية
+        ("https://www.amazon.sa/s?k=clearance&rh=p_8%3A50-99", "🔥 Clearance", False),
+        ("https://www.amazon.sa/s?k=last+chance&rh=p_8%3A50-99", "🔥 Last Chance", False),
+        ("https://www.amazon.sa/s?k=final+sale&rh=p_8%3A50-99", "🔥 Final Sale", False),
+        ("https://www.amazon.sa/s?k=limited+time&rh=p_8%3A50-99", "⏰ Limited Time", False),
+        ("https://www.amazon.sa/s?k=flash+sale&rh=p_8%3A50-99", "⚡ Flash Sale", False),
+        ("https://www.amazon.sa/s?k=super+sale&rh=p_8%3A50-99", "💥 Super Sale", False),
+        ("https://www.amazon.sa/s?k=mega+deal&rh=p_8%3A50-99", "🎯 Mega Deal", False),
+        ("https://www.amazon.sa/s?k=big+sale&rh=p_8%3A50-99", "🎪 Big Sale", False),
         
-        # 🎯 براندات عالية العمولة - ساعات
-        ("https://www.amazon.sa/s?k=casio+watch&rh=p_8%3A30-99", "⌚ Casio", False),
-        ("https://www.amazon.sa/s?k=fossil&rh=p_8%3A30-99", "⌚ Fossil", False),
-        ("https://www.amazon.sa/s?k=swatch&rh=p_8%3A30-99", "⌚ Swatch", False),
-        ("https://www.amazon.sa/s?k=smart+watch&rh=p_8%3A30-99", "⌚ Smart Watch", False),
-        ("https://www.amazon.sa/s?k=rolex&rh=p_8%3A30-99", "⌚ Rolex", False),
-        ("https://www.amazon.sa/s?k=michael+kors&rh=p_8%3A30-99", "⌚ Michael Kors", False),
+        # 🍎 Apple كامل
+        ("https://www.amazon.sa/s?k=iphone&rh=p_8%3A30-99", "🍎 iPhone", False),
+        ("https://www.amazon.sa/s?k=ipad&rh=p_8%3A30-99", "🍎 iPad", False),
+        ("https://www.amazon.sa/s?k=macbook&rh=p_8%3A30-99", "🍎 MacBook", False),
+        ("https://www.amazon.sa/s?k=airpods&rh=p_8%3A30-99", "🍎 AirPods", False),
+        ("https://www.amazon.sa/s?k=apple+watch&rh=p_8%3A30-99", "🍎 Apple Watch", False),
+        ("https://www.amazon.sa/s?k=apple+tv&rh=p_8%3A30-99", "🍎 Apple TV", False),
+        ("https://www.amazon.sa/s?k=airtag&rh=p_8%3A30-99", "🍎 AirTag", False),
+        ("https://www.amazon.sa/s?k=homepod&rh=p_8%3A30-99", "🍎 HomePod", False),
+        
+        # 📱 Samsung كامل
+        ("https://www.amazon.sa/s?k=samsung+galaxy&rh=p_8%3A30-99", "📱 Galaxy Phone", False),
+        ("https://www.amazon.sa/s?k=samsung+tablet&rh=p_8%3A30-99", "📱 Galaxy Tab", False),
+        ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "📱 Galaxy Watch", False),
+        ("https://www.amazon.sa/s?k=samsung+buds&rh=p_8%3A30-99", "📱 Galaxy Buds", False),
+        ("https://www.amazon.sa/s?k=samsung+tv&rh=p_8%3A30-99", "📱 Samsung TV", False),
+        ("https://www.amazon.sa/s?k=samsung+monitor&rh=p_8%3A30-99", "📱 Samsung Monitor", False),
+        
+        # 🎧 سماعات
+        ("https://www.amazon.sa/s?k=sony+headphones&rh=p_8%3A30-99", "🎧 Sony Headphones", False),
+        ("https://www.amazon.sa/s?k=bose+headphones&rh=p_8%3A30-99", "🎧 Bose Headphones", False),
+        ("https://www.amazon.sa/s?k=beats+headphones&rh=p_8%3A30-99", "🎧 Beats Headphones", False),
+        ("https://www.amazon.sa/s?k=jbl+speaker&rh=p_8%3A30-99", "🎧 JBL Speaker", False),
+        ("https://www.amazon.sa/s?k=harman+kardon&rh=p_8%3A30-99", "🎧 Harman Kardon", False),
+        ("https://www.amazon.sa/s?k=marshall&rh=p_8%3A30-99", "🎧 Marshall", False),
+        ("https://www.amazon.sa/s?k=skullcandy&rh=p_8%3A30-99", "🎧 Skullcandy", False),
+        ("https://www.amazon.sa/s?k=sennheiser&rh=p_8%3A30-99", "🎧 Sennheiser", False),
+        
+        # 💻 لابتوبات
+        ("https://www.amazon.sa/s?k=lenovo+laptop&rh=p_8%3A30-99", "💻 Lenovo Laptop", False),
+        ("https://www.amazon.sa/s?k=hp+laptop&rh=p_8%3A30-99", "💻 HP Laptop", False),
+        ("https://www.amazon.sa/s?k=dell+laptop&rh=p_8%3A30-99", "💻 Dell Laptop", False),
+        ("https://www.amazon.sa/s?k=asus+laptop&rh=p_8%3A30-99", "💻 Asus Laptop", False),
+        ("https://www.amazon.sa/s?k=acer+laptop&rh=p_8%3A30-99", "💻 Acer Laptop", False),
+        ("https://www.amazon.sa/s?k=msi+laptop&rh=p_8%3A30-99", "💻 MSI Laptop", False),
+        ("https://www.amazon.sa/s?k=razer+laptop&rh=p_8%3A30-99", "💻 Razer Laptop", False),
+        ("https://www.amazon.sa/s?k=alienware&rh=p_8%3A30-99", "💻 Alienware", False),
+        
+        # 🎮 gaming
+        ("https://www.amazon.sa/s?k=playstation+5&rh=p_8%3A30-99", "🎮 PS5", False),
+        ("https://www.amazon.sa/s?k=playstation+4&rh=p_8%3A30-99", "🎮 PS4", False),
+        ("https://www.amazon.sa/s?k=xbox+series&rh=p_8%3A30-99", "🎮 Xbox Series", False),
+        ("https://www.amazon.sa/s?k=nintendo+switch&rh=p_8%3A30-99", "🎮 Nintendo Switch", False),
+        ("https://www.amazon.sa/s?k=gaming+mouse&rh=p_8%3A30-99", "🎮 Gaming Mouse", False),
+        ("https://www.amazon.sa/s?k=gaming+keyboard&rh=p_8%3A30-99", "🎮 Gaming Keyboard", False),
+        ("https://www.amazon.sa/s?k=gaming+headset&rh=p_8%3A30-99", "🎮 Gaming Headset", False),
+        ("https://www.amazon.sa/s?k=gaming+chair&rh=p_8%3A30-99", "🎮 Gaming Chair", False),
+        ("https://www.amazon.sa/s?k=rtx+graphics&rh=p_8%3A30-99", "🎮 RTX Graphics", False),
+        
+        # 📷 كاميرات
+        ("https://www.amazon.sa/s?k=canon+camera&rh=p_8%3A30-99", "📷 Canon Camera", False),
+        ("https://www.amazon.sa/s?k=nikon+camera&rh=p_8%3A30-99", "📷 Nikon Camera", False),
+        ("https://www.amazon.sa/s?k=sony+camera&rh=p_8%3A30-99", "📷 Sony Camera", False),
+        ("https://www.amazon.sa/s?k=fujifilm&rh=p_8%3A30-99", "📷 Fujifilm", False),
+        ("https://www.amazon.sa/s?k=gopro&rh=p_8%3A30-99", "📷 GoPro", False),
+        ("https://www.amazon.sa/s?k=dji&rh=p_8%3A30-99", "📷 DJI Drone", False),
+        
+        # ⌚ ساعات
         ("https://www.amazon.sa/s?k=apple+watch&rh=p_8%3A30-99", "⌚ Apple Watch", False),
         ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "⌚ Galaxy Watch", False),
+        ("https://www.amazon.sa/s?k=garmin&rh=p_8%3A30-99", "⌚ Garmin", False),
+        ("https://www.amazon.sa/s?k=fitbit&rh=p_8%3A30-99", "⌚ Fitbit", False),
+        ("https://www.amazon.sa/s?k=huawei+watch&rh=p_8%3A30-99", "⌚ Huawei Watch", False),
+        ("https://www.amazon.sa/s?k=amazfit&rh=p_8%3A30-99", "⌚ Amazfit", False),
+        ("https://www.amazon.sa/s?k=casio+g+shock&rh=p_8%3A30-99", "⌚ G-Shock", False),
+        ("https://www.amazon.sa/s?k=casio+edifice&rh=p_8%3A30-99", "⌚ Edifice", False),
+        ("https://www.amazon.sa/s?k=seiko&rh=p_8%3A30-99", "⌚ Seiko", False),
+        ("https://www.amazon.sa/s?k=citizen&rh=p_8%3A30-99", "⌚ Citizen", False),
         
-        # 🎯 براندات عالية العمولة - عطور
+        # 🌸 عطور فاخرة
         ("https://www.amazon.sa/s?k=chanel+perfume&rh=p_8%3A30-99", "🌸 Chanel", False),
         ("https://www.amazon.sa/s?k=dior+perfume&rh=p_8%3A30-99", "🌸 Dior", False),
         ("https://www.amazon.sa/s?k=gucci+perfume&rh=p_8%3A30-99", "🌸 Gucci", False),
@@ -242,111 +299,185 @@ def search_all_deals(chat_id, status_message_id):
         ("https://www.amazon.sa/s?k=calvin+klein+perfume&rh=p_8%3A30-99", "🌸 CK Perfume", False),
         ("https://www.amazon.sa/s?k=tom+ford+perfume&rh=p_8%3A30-99", "🌸 Tom Ford", False),
         ("https://www.amazon.sa/s?k=yves+saint+laurent+perfume&rh=p_8%3A30-99", "🌸 YSL", False),
+        ("https://www.amazon.sa/s?k=creed+perfume&rh=p_8%3A30-99", "🌸 Creed", False),
+        ("https://www.amazon.sa/s?k=jo+malone&rh=p_8%3A30-99", "🌸 Jo Malone", False),
         
-        # 🎯 براندات عالية العمولة - أزياء
-        ("https://www.amazon.sa/s?k=adidas&rh=p_8%3A30-99", "👟 Adidas", False),
-        ("https://www.amazon.sa/s?k=nike&rh=p_8%3A30-99", "👟 Nike", False),
-        ("https://www.amazon.sa/s?k=calvin+klein&rh=p_8%3A30-99", "👔 Calvin Klein", False),
-        ("https://www.amazon.sa/s?k=lacoste&rh=p_8%3A30-99", "🐊 Lacoste", False),
-        ("https://www.amazon.sa/s?k=tommy+hilfiger&rh=p_8%3A30-99", "👕 Tommy Hilfiger", False),
-        ("https://www.amazon.sa/s?k=ralph+lauren&rh=p_8%3A30-99", "👔 Ralph Lauren", False),
-        ("https://www.amazon.sa/s?k=puma&rh=p_8%3A30-99", "👟 Puma", False),
-        ("https://www.amazon.sa/s?k=reebok&rh=p_8%3A30-99", "👟 Reebok", False),
-        ("https://www.amazon.sa/s?k=under+armour&rh=p_8%3A30-99", "👟 Under Armour", False),
-        ("https://www.amazon.sa/s?k=levis&rh=p_8%3A30-99", "👖 Levis", False),
-        ("https://www.amazon.sa/s?k=wrangler&rh=p_8%3A30-99", "👖 Wrangler", False),
-        ("https://www.amazon.sa/s?k=timberland&rh=p_8%3A30-99", "👢 Timberland", False),
-        ("https://www.amazon.sa/s?k=skechers&rh=p_8%3A30-99", "👟 Skechers", False),
-        ("https://www.amazon.sa/s?k=new+balance&rh=p_8%3A30-99", "👟 New Balance", False),
+        # 👟 أحذية رياضية
+        ("https://www.amazon.sa/s?k=nike+shoes&rh=p_8%3A30-99", "👟 Nike Shoes", False),
+        ("https://www.amazon.sa/s?k=adidas+shoes&rh=p_8%3A30-99", "👟 Adidas Shoes", False),
+        ("https://www.amazon.sa/s?k=jordan&rh=p_8%3A30-99", "👟 Jordan", False),
+        ("https://www.amazon.sa/s?k=yeezy&rh=p_8%3A30-99", "👟 Yeezy", False),
+        ("https://www.amazon.sa/s?k=new+balance+shoes&rh=p_8%3A30-99", "👟 New Balance", False),
+        ("https://www.amazon.sa/s?k=puma+shoes&rh=p_8%3A30-99", "👟 Puma Shoes", False),
+        ("https://www.amazon.sa/s?k=reebok+shoes&rh=p_8%3A30-99", "👟 Reebok Shoes", False),
+        ("https://www.amazon.sa/s?k=under+armour+shoes&rh=p_8%3A30-99", "👟 UA Shoes", False),
+        ("https://www.amazon.sa/s?k=asics&rh=p_8%3A30-99", "👟 Asics", False),
+        ("https://www.amazon.sa/s?k=vans&rh=p_8%3A30-99", "👟 Vans", False),
+        ("https://www.amazon.sa/s?k=converse&rh=p_8%3A30-99", "👟 Converse", False),
+        ("https://www.amazon.sa/s?k=crocs&rh=p_8%3A30-99", "👟 Crocs", False),
         
-        # 🎯 براندات عالية العمولة - مكياج وعناية
-        ("https://www.amazon.sa/s?k=loreal&rh=p_8%3A30-99", "💄 L'Oreal", False),
-        ("https://www.amazon.sa/s?k=maybelline&rh=p_8%3A30-99", "💄 Maybelline", False),
+        # 👔 ملابس رجالي
+        ("https://www.amazon.sa/s?k=calvin+klein+men&rh=p_8%3A30-99", "👔 CK Men", False),
+        ("https://www.amazon.sa/s?k=tommy+hilfiger+men&rh=p_8%3A30-99", "👔 Tommy Men", False),
+        ("https://www.amazon.sa/s?k=ralph+lauren+men&rh=p_8%3A30-99", "👔 RL Men", False),
+        ("https://www.amazon.sa/s?k=lacoste+men&rh=p_8%3A30-99", "👔 Lacoste Men", False),
+        ("https://www.amazon.sa/s?k=hugo+boss&rh=p_8%3A30-99", "👔 Hugo Boss", False),
+        ("https://www.amazon.sa/s?k=levis+jeans&rh=p_8%3A30-99", "👔 Levis Jeans", False),
+        ("https://www.amazon.sa/s?k=wrangler+jeans&rh=p_8%3A30-99", "👔 Wrangler Jeans", False),
+        ("https://www.amazon.sa/s?k=diesel&rh=p_8%3A30-99", "👔 Diesel", False),
+        ("https://www.amazon.sa/s?k=g+star&rh=p_8%3A30-99", "👔 G-Star", False),
+        
+        # 👗 ملابس حريمي
+        ("https://www.amazon.sa/s?k=michael+kors+bag&rh=p_8%3A30-99", "👜 MK Bags", False),
+        ("https://www.amazon.sa/s?k=kate+spade&rh=p_8%3A30-99", "👜 Kate Spade", False),
+        ("https://www.amazon.sa/s?k=coach+bag&rh=p_8%3A30-99", "👜 Coach", False),
+        ("https://www.amazon.sa/s?k=guess+bag&rh=p_8%3A30-99", "👜 Guess", False),
+        ("https://www.amazon.sa/s?k=fossil+bag&rh=p_8%3A30-99", "👜 Fossil Bag", False),
+        ("https://www.amazon.sa/s?k=vera+bradley&rh=p_8%3A30-99", "👜 Vera Bradley", False),
+        
+        # 💎 مجوهرات
+        ("https://www.amazon.sa/s?k=swarovski&rh=p_8%3A30-99", "💎 Swarovski", False),
+        ("https://www.amazon.sa/s?k=pandora&rh=p_8%3A30-99", "💎 Pandora", False),
+        ("https://www.amazon.sa/s?k=tiffany&rh=p_8%3A30-99", "💎 Tiffany", False),
+        ("https://www.amazon.sa/s?k=cartier&rh=p_8%3A30-99", "💎 Cartier", False),
+        ("https://www.amazon.sa/s?k=bulova&rh=p_8%3A30-99", "💎 Bulova", False),
+        ("https://www.amazon.sa/s?k=anne+klein&rh=p_8%3A30-99", "💎 Anne Klein", False),
+        
+        # 🕶️ نظارات
+        ("https://www.amazon.sa/s?k=ray+ban&rh=p_8%3A30-99", "🕶️ Ray Ban", False),
+        ("https://www.amazon.sa/s?k=oakley&rh=p_8%3A30-99", "🕶️ Oakley", False),
+        ("https://www.amazon.sa/s?k=persol&rh=p_8%3A30-99", "🕶️ Persol", False),
+        ("https://www.amazon.sa/s?k=prada+sunglasses&rh=p_8%3A30-99", "🕶️ Prada", False),
+        ("https://www.amazon.sa/s?k=gucci+sunglasses&rh=p_8%3A30-99", "🕶️ Gucci Sun", False),
+        ("https://www.amazon.sa/s?k=burberry+sunglasses&rh=p_8%3A30-99", "🕶️ Burberry Sun", False),
+        
+        # 💄 مكياج
         ("https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99", "💄 MAC", False),
-        ("https://www.amazon.sa/s?k=nyx&rh=p_8%3A30-99", "💄 NYX", False),
-        ("https://www.amazon.sa/s?k=clinique&rh=p_8%3A30-99", "💄 Clinique", False),
-        ("https://www.amazon.sa/s?k=estee+lauder&rh=p_8%3A30-99", "💄 Estee Lauder", False),
-        ("https://www.amazon.sa/s?k=olay&rh=p_8%3A30-99", "💆 Olay", False),
-        ("https://www.amazon.sa/s?k=nivea&rh=p_8%3A30-99", "💆 Nivea", False),
-        ("https://www.amazon.sa/s?k=dove&rh=p_8%3A30-99", "🧼 Dove", False),
-        ("https://www.amazon.sa/s?k=pantene&rh=p_8%3A30-99", "💇 Pantene", False),
-        ("https://www.amazon.sa/s?k=kerastase&rh=p_8%3A30-99", "💇 Kerastase", False),
-        ("https://www.amazon.sa/s?k=the+ordinary&rh=p_8%3A30-99", "💆 The Ordinary", False),
+        ("https://www.amazon.sa/s?k=nyx+makeup&rh=p_8%3A30-99", "💄 NYX", False),
+        ("https://www.amazon.sa/s?k=maybelline+makeup&rh=p_8%3A30-99", "💄 Maybelline", False),
+        ("https://www.amazon.sa/s?k=loreal+makeup&rh=p_8%3A30-99", "💄 L'Oreal", False),
+        ("https://www.amazon.sa/s?k=revlon&rh=p_8%3A30-99", "💄 Revlon", False),
+        ("https://www.amazon.sa/s?k=covergirl&rh=p_8%3A30-99", "💄 Covergirl", False),
+        ("https://www.amazon.sa/s?k=bobbi+brown&rh=p_8%3A30-99", "💄 Bobbi Brown", False),
+        ("https://www.amazon.sa/s?k=anastasia&rh=p_8%3A30-99", "💄 Anastasia", False),
+        ("https://www.amazon.sa/s?k=huda+beauty&rh=p_8%3A30-99", "💄 Huda Beauty", False),
+        ("https://www.amazon.sa/s?k=fenty+beauty&rh=p_8%3A30-99", "💄 Fenty", False),
         
-        # 🎯 منتجات الأطفال (مبيعات عالية)
+        # 🧴 عناية شخصية
+        ("https://www.amazon.sa/s?k=olay&rh=p_8%3A30-99", "💆 Olay", False),
+        ("https://www.amazon.sa/s?k=neutrogena&rh=p_8%3A30-99", "💆 Neutrogena", False),
+        ("https://www.amazon.sa/s?k=cerave&rh=p_8%3A30-99", "💆 CeraVe", False),
+        ("https://www.amazon.sa/s?k=cetaphil&rh=p_8%3A30-99", "💆 Cetaphil", False),
+        ("https://www.amazon.sa/s?k=la+roche+posay&rh=p_8%3A30-99", "💆 La Roche", False),
+        ("https://www.amazon.sa/s?k=vichy&rh=p_8%3A30-99", "💆 Vichy", False),
+        ("https://www.amazon.sa/s?k=eucerin&rh=p_8%3A30-99", "💆 Eucerin", False),
+        ("https://www.amazon.sa/s?k=aveeno&rh=p_8%3A30-99", "💆 Aveeno", False),
+        ("https://www.amazon.sa/s?k=bioderma&rh=p_8%3A30-99", "💆 Bioderma", False),
+        
+        # 👶 أطفال
         ("https://www.amazon.sa/s?k=pampers&rh=p_8%3A30-99", "👶 Pampers", False),
+        ("https://www.amazon.sa/s?k=huggies&rh=p_8%3A30-99", "👶 Huggies", False),
         ("https://www.amazon.sa/s?k=johnson+baby&rh=p_8%3A30-99", "👶 Johnson's", False),
+        ("https://www.amazon.sa/s?k=mustela&rh=p_8%3A30-99", "👶 Mustela", False),
+        ("https://www.amazon.sa/s?k=aveeno+baby&rh=p_8%3A30-99", "👶 Aveeno Baby", False),
         ("https://www.amazon.sa/s?k=lego&rh=p_8%3A30-99", "🧱 LEGO", False),
         ("https://www.amazon.sa/s?k=barbie&rh=p_8%3A30-99", "👸 Barbie", False),
         ("https://www.amazon.sa/s?k=hot+wheels&rh=p_8%3A30-99", "🚗 Hot Wheels", False),
         ("https://www.amazon.sa/s?k=fisher+price&rh=p_8%3A30-99", "🎠 Fisher Price", False),
-        ("https://www.amazon.sa/s?k=ninjago&rh=p_8%3A30-99", "🥷 Ninjago", False),
-        ("https://www.amazon.sa/s?k=play-doh&rh=p_8%3A30-99", "🎨 Play-Doh", False),
+        ("https://www.amazon.sa/s?k=little+tikes&rh=p_8%3A30-99", "🎪 Little Tikes", False),
+        ("https://www.amazon.sa/s?k=playskool&rh=p_8%3A30-99", "🎨 Playskool", False),
+        ("https://www.amazon.sa/s?k=vtech&rh=p_8%3A30-99", "🔤 VTech", False),
+        ("https://www.amazon.sa/s?k=leapfrog&rh=p_8%3A30-99", "🐸 LeapFrog", False),
         
-        # 🎯 رياضة ولياقة
-        ("https://www.amazon.sa/s?k=fitness+equipment&rh=p_8%3A30-99", "🏋️ Fitness Equipment", False),
+        # 🏋️ رياضة
+        ("https://www.amazon.sa/s?k=fitness+equipment&rh=p_8%3A30-99", "🏋️ Fitness", False),
         ("https://www.amazon.sa/s?k=yoga+mat&rh=p_8%3A30-99", "🧘 Yoga Mat", False),
         ("https://www.amazon.sa/s?k=dumbbells&rh=p_8%3A30-99", "🏋️ Dumbbells", False),
-        ("https://www.amazon.sa/s?k=running+shoes&rh=p_8%3A30-99", "👟 Running Shoes", False),
-        ("https://www.amazon.sa/s?k=cycling&rh=p_8%3A30-99", "🚴 Cycling", False),
+        ("https://www.amazon.sa/s?k=kettlebell&rh=p_8%3A30-99", "🏋️ Kettlebell", False),
+        ("https://www.amazon.sa/s?k=resistance+bands&rh=p_8%3A30-99", "🏋️ Resistance", False),
         ("https://www.amazon.sa/s?k=treadmill&rh=p_8%3A30-99", "🏃 Treadmill", False),
-        ("https://www.amazon.sa/s?k=protein&rh=p_8%3A30-99", "💪 Protein", False),
+        ("https://www.amazon.sa/s?k=exercise+bike&rh=p_8%3A30-99", "🚴 Exercise Bike", False),
+        ("https://www.amazon.sa/s?k=elliptical&rh=p_8%3A30-99", "🏃 Elliptical", False),
+        ("https://www.amazon.sa/s?k=protein+powder&rh=p_8%3A30-99", "💪 Protein", False),
+        ("https://www.amazon.sa/s?k=bcaa&rh=p_8%3A30-99", "💪 BCAA", False),
+        ("https://www.amazon.sa/s?k=creatine&rh=p_8%3A30-99", "💪 Creatine", False),
+        ("https://www.amazon.sa/s?k=pre+workout&rh=p_8%3A30-99", "💪 Pre Workout", False),
+        ("https://www.amazon.sa/s?k=optimum+nutrition&rh=p_8%3A30-99", "💪 ON", False),
+        ("https://www.amazon.sa/s?k=muscletech&rh=p_8%3A30-99", "💪 MuscleTech", False),
+        ("https://www.amazon.sa/s?k=dymatize&rh=p_8%3A30-99", "💪 Dymatize", False),
+        ("https://www.amazon.sa/s?k=bpi+sports&rh=p_8%3A30-99", "💪 BPI", False),
         
-        # 🎯 منزل ومطبخ
-        ("https://www.amazon.sa/s?k=philips&rh=p_8%3A30-99", "🏠 Philips", False),
-        ("https://www.amazon.sa/s?k=braun&rh=p_8%3A30-99", "🏠 Braun", False),
-        ("https://www.amazon.sa/s?k=tupperware&rh=p_8%3A30-99", "🥣 Tupperware", False),
-        ("https://www.amazon.sa/s?k=pyrex&rh=p_8%3A30-99", "🍽️ Pyrex", False),
+        # 🏠 منزل
+        ("https://www.amazon.sa/s?k=philips+air+fryer&rh=p_8%3A30-99", "🏠 Philips AirFryer", False),
         ("https://www.amazon.sa/s?k=ninja+blender&rh=p_8%3A30-99", "🥤 Ninja", False),
-        ("https://www.amazon.sa/s?k=dyson&rh=p_8%3A30-99", "🏠 Dyson", False),
         ("https://www.amazon.sa/s?k=nespresso&rh=p_8%3A30-99", "☕ Nespresso", False),
         ("https://www.amazon.sa/s?k=delonghi&rh=p_8%3A30-99", "☕ DeLonghi", False),
+        ("https://www.amazon.sa/s?k=breville&rh=p_8%3A30-99", "🏠 Breville", False),
+        ("https://www.amazon.sa/s?k=kenwood&rh=p_8%3A30-99", "🏠 Kenwood", False),
+        ("https://www.amazon.sa/s?k=kitchenaid&rh=p_8%3A30-99", "🏠 KitchenAid", False),
+        ("https://www.amazon.sa/s?k=cuisinart&rh=p_8%3A30-99", "🏠 Cuisinart", False),
+        ("https://www.amazon.sa/s?k=tupperware&rh=p_8%3A30-99", "🥣 Tupperware", False),
+        ("https://www.amazon.sa/s?k=pyrex&rh=p_8%3A30-99", "🍽️ Pyrex", False),
+        ("https://www.amazon.sa/s?k=corelle&rh=p_8%3A30-99", "🍽️ Corelle", False),
+        ("https://www.amazon.sa/s?k=dyson+vacuum&rh=p_8%3A30-99", "🏠 Dyson", False),
+        ("https://www.amazon.sa/s?k=irobot&rh=p_8%3A30-99", "🏠 iRobot", False),
+        ("https://www.amazon.sa/s?k=ecovacs&rh=p_8%3A30-99", "🏠 Ecovacs", False),
+        ("https://www.amazon.sa/s?k=braun+blender&rh=p_8%3A30-99", "🏠 Braun", False),
         
-        # 🎯 اكسسوارات ومجوهرات
-        ("https://www.amazon.sa/s?k=handbag&rh=p_8%3A30-99", "👜 Handbag", False),
-        ("https://www.amazon.sa/s?k=sunglasses&rh=p_8%3A30-99", "🕶️ Sunglasses", False),
-        ("https://www.amazon.sa/s?k=backpack&rh=p_8%3A30-99", "🎒 Backpack", False),
-        ("https://www.amazon.sa/s?k=airpods&rh=p_8%3A30-99", "🎧 AirPods", False),
-        ("https://www.amazon.sa/s?k=ray+ban&rh=p_8%3A30-99", "🕶️ Ray Ban", False),
-        ("https://www.amazon.sa/s?k=oakley&rh=p_8%3A30-99", "🕶️ Oakley", False),
-        ("https://www.amazon.sa/s?k=swarovski&rh=p_8%3A30-99", "💎 Swarovski", False),
-        ("https://www.amazon.sa/s?k=pandora&rh=p_8%3A30-99", "💎 Pandora", False),
-        ("https://www.amazon.sa/s?k=cartier&rh=p_8%3A30-99", "💎 Cartier", False),
-        
-        # 🎯 أدوات وتحسين المنزل
+        # 🔧 أدوات
         ("https://www.amazon.sa/s?k=bosch+tools&rh=p_8%3A30-99", "🔧 Bosch", False),
         ("https://www.amazon.sa/s?k=makita&rh=p_8%3A30-99", "🔧 Makita", False),
         ("https://www.amazon.sa/s?k=dewalt&rh=p_8%3A30-99", "🔧 DeWalt", False),
         ("https://www.amazon.sa/s?k=black+decker&rh=p_8%3A30-99", "🔧 Black & Decker", False),
         ("https://www.amazon.sa/s?k=stanley&rh=p_8%3A30-99", "🔧 Stanley", False),
+        ("https://www.amazon.sa/s?k=craftsman&rh=p_8%3A30-99", "🔧 Craftsman", False),
+        ("https://www.amazon.sa/s?k=ryobi&rh=p_8%3A30-99", "🔧 Ryobi", False),
+        ("https://www.amazon.sa/s?k=worx&rh=p_8%3A30-99", "🔧 Worx", False),
         
-        # 🎯 أقسام خاصة بالسعودية
+        # 🚗 سيارات
+        ("https://www.amazon.sa/s?k=michelin+tires&rh=p_8%3A30-99", "🚗 Michelin", False),
+        ("https://www.amazon.sa/s?k=bridgestone+tires&rh=p_8%3A30-99", "🚗 Bridgestone", False),
+        ("https://www.amazon.sa/s?k=goodyear+tires&rh=p_8%3A30-99", "🚗 Goodyear", False),
+        ("https://www.amazon.sa/s?k=pirelli&rh=p_8%3A30-99", "🚗 Pirelli", False),
+        ("https://www.amazon.sa/s?k=continental+tires&rh=p_8%3A30-99", "🚗 Continental", False),
+        ("https://www.amazon.sa/s?k=bosch+car&rh=p_8%3A30-99", "🚗 Bosch Car", False),
+        ("https://www.amazon.sa/s?k=shell+oil&rh=p_8%3A30-99", "🚗 Shell", False),
+        ("https://www.amazon.sa/s?k=mobil+1&rh=p_8%3A30-99", "🚗 Mobil 1", False),
+        ("https://www.amazon.sa/s?k=castrol&rh=p_8%3A30-99", "🚗 Castrol", False),
+        
+        # 📚 كتب
+        ("https://www.amazon.sa/s?k=kindle&rh=p_8%3A30-99", "📚 Kindle", False),
+        ("https://www.amazon.sa/s?k=harry+potter+book&rh=p_8%3A30-99", "📚 Harry Potter", False),
+        
+        # 🌙 سعودي خاص
         ("https://www.amazon.sa/s?k=dates&rh=p_8%3A30-99", "🌴 Dates", False),
         ("https://www.amazon.sa/s?k=oud&rh=p_8%3A30-99", "🌿 Oud", False),
+        ("https://www.amazon.sa/s?k=bakhoor&rh=p_8%3A30-99", "🌿 Bakhoor", False),
         ("https://www.amazon.sa/s?k=prayer+mat&rh=p_8%3A30-99", "🕌 Prayer Mat", False),
+        ("https://www.amazon.sa/s?k=thobe&rh=p_8%3A30-99", "👘 Thobe", False),
+        ("https://www.amazon.sa/s?k=abaya&rh=p_8%3A30-99", "🧕 Abaya", False),
         ("https://www.amazon.sa/s?k=ramadan&rh=p_8%3A30-99", "🌙 Ramadan", False),
         ("https://www.amazon.sa/s?k=eid&rh=p_8%3A30-99", "🎉 Eid", False),
+        ("https://www.amazon.sa/s?k=hajj&rh=p_8%3A30-99", "🕋 Hajj", False),
+        ("https://www.amazon.sa/s?k=umrah&rh=p_8%3A30-99", "🕋 Umrah", False),
         
-        # 🔥 عروض سرية - Hidden Deals
-        ("https://www.amazon.sa/s?k=clearance&rh=p_8%3A50-99", "🔥 Clearance", False),
-        ("https://www.amazon.sa/s?k=last+chance&rh=p_8%3A50-99", "🔥 Last Chance", False),
-        ("https://www.amazon.sa/s?k=final+sale&rh=p_8%3A50-99", "🔥 Final Sale", False),
-        ("https://www.amazon.sa/s?k=limited+time&rh=p_8%3A50-99", "⏰ Limited Time", False),
-        ("https://www.amazon.sa/s?k=flash+sale&rh=p_8%3A50-99", "⚡ Flash Sale", False),
-        
-        # 💎 منتجات فاخرة - Luxury
+        # 💎 فاخر
         ("https://www.amazon.sa/s?k=louis+vuitton&rh=p_8%3A30-99", "👜 LV", False),
         ("https://www.amazon.sa/s?k=hermes&rh=p_8%3A30-99", "👜 Hermes", False),
         ("https://www.amazon.sa/s?k=coach&rh=p_8%3A30-99", "👜 Coach", False),
         ("https://www.amazon.sa/s?k=kate+spade&rh=p_8%3A30-99", "👜 Kate Spade", False),
-        ("https://www.amazon.sa/s?k=tiffany&rh=p_8%3A30-99", "💍 Tiffany", False),
+        ("https://www.amazon.sa/s?k=burberry+bag&rh=p_8%3A30-99", "👜 Burberry", False),
+        ("https://www.amazon.sa/s?k=longchamp&rh=p_8%3A30-99", "👜 Longchamp", False),
+        ("https://www.amazon.sa/s?k=tumi&rh=p_8%3A30-99", "🧳 Tumi", False),
+        ("https://www.amazon.sa/s?k=samsonite&rh=p_8%3A30-99", "🧳 Samsonite", False),
+        ("https://www.amazon.sa/s?k=rimowa&rh=p_8%3A30-99", "🧳 Rimowa", False),
     ]
     
     total = len(categories)
     
     for idx, (url, cat_name, is_best_seller) in enumerate(categories, 1):
         try:
-            if idx % 5 == 0:
+            if idx % 10 == 0:
                 progress = f"⏳ جاري البحث... ({idx}/{total})\n📍 {cat_name}"
                 try:
                     updater.bot.edit_message_text(
@@ -502,12 +633,11 @@ def filter_premium_deals(deals):
         pid = deal['id']
         title = deal['title']
         
-        # تخفيض الحد الأدنى للعروض المخفية
         min_discount = 50 if 'Warehouse' in deal['category'] or 'Outlet' in deal['category'] or 'Clearance' in deal['category'] else (60 if is_bs else 65)
         
         has_discount = disc >= min_discount
         has_rating = rating >= 3.0
-        is_reasonable = 0.5 < deal['price'] < 8000
+        is_reasonable = 0.5 < deal['price'] < 10000
         
         if has_discount and has_rating and is_reasonable:
             if pid in sent_products or pid in seen_in_run:
@@ -627,12 +757,13 @@ def start_cmd(update: Update, context: CallbackContext):
 👋 *أهلاً بيك في Amazon Deals Bot!*
 
 🎯 أنا ببحث في:
-• 120+ قسم شامل 📁
+• 200+ قسم شامل 📁
 • عروض Warehouse المخفية 🏭
 • Outlet & Clearance 🎁
 • Lightning Deals ⚡
 • Prime Exclusives 👑
 • Best Sellers ⭐
+• براندات فاخرة 💎
 
 🔥 خصومات من 50% لـ 99%!
 
@@ -650,7 +781,7 @@ def hi_cmd(update: Update, context: CallbackContext):
     
     is_scanning = True
     
-    status_msg = update.message.reply_text("🔍 *بدأت البحث في 120+ قسم...*\n⏱️ 4-5 دقائق", parse_mode='Markdown')
+    status_msg = update.message.reply_text("🔍 *بدأت البحث في 200+ قسم...*\n⏱️ 5-7 دقائق", parse_mode='Markdown')
     
     try:
         load_database()
@@ -675,7 +806,7 @@ def status_cmd(update: Update, context: CallbackContext):
 
 📦 منتجات مخزنة: {len(sent_products)}
 🔍 بحوث متنوعة: {len(sent_hashes)}
-📁 الأقسام: 120+
+📁 الأقسام: 200+
 ⏰ التوقيت: {datetime.now().strftime('%H:%M:%S')}
 
 ✅ البوت شغال بكفاءة!
@@ -700,7 +831,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             "status": "ok",
             "products": len(sent_products),
             "timestamp": datetime.now().isoformat(),
-            "categories": 120
+            "categories": 200
         })
         self.wfile.write(response.encode())
     
