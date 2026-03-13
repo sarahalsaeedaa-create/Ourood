@@ -42,7 +42,59 @@ def load_database():
     except Exception as e:
         logger.error(e)
 
+def generate_categories():
 
+    categories = []
+
+    base_categories = [
+        "electronics","fashion","beauty","watches","shoes","kitchen",
+        "home","computers","mobile","perfumes","toys","sports",
+        "baby","grocery","automotive","tools","books","jewelry"
+    ]
+
+    for c in base_categories:
+
+        categories.append(
+            (f"https://www.amazon.sa/gp/bestsellers/{c}", f"⭐ BestSeller {c}", True)
+        )
+
+        categories.append(
+            (f"https://www.amazon.sa/gp/movers-and-shakers/{c}", f"📈 Movers {c}", False)
+        )
+
+        categories.append(
+            (f"https://www.amazon.sa/gp/most-wished-for/{c}", f"💝 Wished {c}", False)
+        )
+
+        categories.append(
+            (f"https://www.amazon.sa/gp/new-releases/{c}", f"🆕 New {c}", False)
+        )
+
+    keywords = [
+        "clearance","discount","flash sale",
+        "limited time","mega deal","big sale"
+    ]
+
+    for k in keywords:
+
+        categories.append(
+            (f"https://www.amazon.sa/s?k={k}&pct-off=50-90", f"💰 {k}", False)
+        )
+
+    categories.append(
+        ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse", False)
+    )
+
+    categories.append(
+        ("https://www.amazon.sa/gp/coupons", "🎟️ Coupons", False)
+    )
+
+    categories.append(
+        ("https://www.amazon.sa/gp/todays-deals", "📅 Today Deals", False)
+    )
+
+    return categories
+    
 def save_database():
     with open('bot_database.json', 'w', encoding='utf-8') as f:
         json.dump({
