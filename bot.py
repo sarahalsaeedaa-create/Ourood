@@ -779,7 +779,4 @@ def parse_item(item, category, is_best_seller):
                 old_price = price / (1 - discount/100)
     
     title = "Unknown"
-    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated', '.a-size-medium']:
-        el = item.select_one(sel)
-        if el:
-           
+    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated', '.a-size-medium
