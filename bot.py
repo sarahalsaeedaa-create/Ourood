@@ -4,62 +4,48 @@ import json
 import time
 import random
 import hashlib
-import logging
-
 import cloudscraper
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
-
 from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
-# ---------------- BOT TOKEN ----------------
-
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
 
-# -------------------------------------------
-
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-
-logger = logging.getLogger(__name__)
-
 ua = UserAgent()
-
 sent_hashes = set()
 is_scanning = False
 updater = None
 
 
-# ---------- DATABASE ----------
+# ---------------- DATABASE ----------------
 
 def load_database():
     global sent_hashes
-    if os.path.exists("bot_database.json"):
+
+    if os.path.exists("database.json"):
         try:
-            with open("bot_database.json", "r") as f:
+            with open("database.json","r") as f:
                 data = json.load(f)
-                sent_hashes = set(data.get("hashes", []))
+                sent_hashes = set(data.get("hashes",[]))
         except:
             pass
 
 
 def save_database():
     try:
-        with open("bot_database.json", "w") as f:
-            json.dump({"hashes": list(sent_hashes)}, f)
+        with open("database.json","w") as f:
+            json.dump({"hashes":list(sent_hashes)},f)
     except:
         pass
 
 
-# ---------- HELPERS ----------
+# ---------------- HELPERS ----------------
 
-def create_hash(title):
+def create_hash(text):
 
-    clean = re.sub(r"[^\w\s]", "", title.lower())
-    clean = re.sub(r"\d+", "", clean)
+    clean = re.sub(r"[^\w\s]","",text.lower())
+    clean = re.sub(r"\d+","",clean)
     clean = clean[:40]
 
     return hashlib.md5(clean.encode()).hexdigest()
@@ -67,23 +53,23 @@ def create_hash(title):
 
 def create_session():
 
-    session = cloudscraper.create_scraper()
+    s = cloudscraper.create_scraper()
 
-    session.headers.update({
-        "User-Agent": ua.random,
-        "Accept-Language": "en-US,en;q=0.9"
+    s.headers.update({
+        "User-Agent":ua.random,
+        "Accept-Language":"en-US,en;q=0.9"
     })
 
-    return session
+    return s
 
 
-def fetch_page(session, url):
+def fetch_page(session,url):
 
     for _ in range(3):
 
         try:
 
-            r = session.get(url, timeout=25)
+            r = session.get(url,timeout=30)
 
             if r.status_code == 200:
                 return r.text
@@ -91,49 +77,56 @@ def fetch_page(session, url):
         except:
             pass
 
-        time.sleep(random.uniform(0.7, 1.5))
+        time.sleep(random.uniform(0.5,1.5))
 
     return None
 
 
-# ---------- SEARCH SOURCES ----------
+# ---------------- BUILD SEARCH ----------------
 
 def build_categories():
 
     keywords = [
-        "iphone","ipad","macbook","airpods","apple watch",
-        "samsung galaxy","sony headphones","bose headphones",
-        "nike shoes","adidas shoes","ps5","xbox series",
-        "lego","barbie","protein powder","creatine",
-        "dyson vacuum","air fryer","nespresso","bosch tools",
-        "treadmill","dumbbells","yoga mat"
+
+    "iphone","ipad","macbook","airpods","apple watch",
+    "samsung","galaxy","sony headphones","bose",
+    "gaming monitor","mechanical keyboard","gaming mouse",
+    "ps5","xbox","gaming chair","vr headset",
+    "lego","barbie","toys","drone",
+    "nike","adidas","puma","running shoes",
+    "protein powder","creatine","mass gainer",
+    "air fryer","coffee machine","blender",
+    "vacuum cleaner","dyson","robot vacuum",
+    "power tools","drill","tool set",
+    "treadmill","exercise bike","dumbbells",
+    "smart tv","4k tv","oled tv",
+    "ssd","external ssd","hard drive",
+    "router","wifi 6 router","mesh wifi"
+
     ]
 
-    categories = []
+    urls = []
 
     for kw in keywords:
 
-        for page in range(1,6):
+        for page in range(1,16):
 
-            categories.append(
-                (
-                    f"https://www.amazon.sa/s?k={kw}&page={page}",
-                    f"{kw} page {page}"
-                )
+            urls.append(
+                f"https://www.amazon.sa/s?k={kw}&page={page}"
             )
 
-    categories.append(("https://www.amazon.sa/gp/todays-deals","Today Deals"))
+    urls.append("https://www.amazon.sa/gp/todays-deals")
 
-    return categories
+    return urls
 
 
-# ---------- PARSE ----------
+# ---------------- PARSE ----------------
 
-def parse_items(html, category):
+def parse_items(html):
 
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html,"html.parser")
 
-    items = soup.find_all("div", {"data-component-type": "s-search-result"})
+    items = soup.find_all("div",{"data-component-type":"s-search-result"})
 
     deals = []
 
@@ -151,51 +144,46 @@ def parse_items(html, category):
             if not price_el:
                 continue
 
-            price_text = price_el.text.replace(",", "")
-            price = float(re.findall(r"\d+\.?\d*", price_text)[0])
+            price = float(re.findall(r"\d+\.?\d*",price_el.text)[0])
 
             old_el = item.select_one(".a-text-price .a-offscreen")
-
             if not old_el:
                 continue
 
-            old_text = old_el.text.replace(",", "")
-            old_price = float(re.findall(r"\d+\.?\d*", old_text)[0])
+            old_price = float(re.findall(r"\d+\.?\d*",old_el.text)[0])
 
             if old_price <= price:
                 continue
 
-            discount = int(((old_price - price) / old_price) * 100)
+            discount = int(((old_price-price)/old_price)*100)
 
             rating = 0
             rating_el = item.select_one(".a-icon-alt")
 
             if rating_el:
-                rating_match = re.search(r"(\d+\.?\d*)", rating_el.text)
-                if rating_match:
-                    rating = float(rating_match.group(1))
+                m = re.search(r"(\d+\.?\d*)",rating_el.text)
+                if m:
+                    rating = float(m.group(1))
 
             link = item.select_one("a")["href"]
 
             if link.startswith("/"):
-                link = "https://www.amazon.sa" + link
+                link = "https://www.amazon.sa"+link
 
             img = ""
-
             img_el = item.select_one("img")
 
             if img_el:
-                img = img_el.get("src", "")
+                img = img_el.get("src","")
 
             deals.append({
-                "title": title,
-                "price": price,
-                "old_price": old_price,
-                "discount": discount,
-                "rating": rating,
-                "link": link,
-                "image": img,
-                "category": category
+                "title":title,
+                "price":price,
+                "old":old_price,
+                "discount":discount,
+                "rating":rating,
+                "link":link,
+                "img":img
             })
 
         except:
@@ -204,31 +192,33 @@ def parse_items(html, category):
     return deals
 
 
-# ---------- SEARCH ----------
+# ---------------- SEARCH ----------------
 
 def search_all():
 
     session = create_session()
 
-    categories = build_categories()
+    urls = build_categories()
 
     all_deals = []
 
-    for url, name in categories:
+    for url in urls:
 
-        html = fetch_page(session, url)
+        html = fetch_page(session,url)
 
         if not html:
             continue
 
-        deals = parse_items(html, name)
+        deals = parse_items(html)
 
         all_deals.extend(deals)
+
+        time.sleep(random.uniform(0.4,1.0))
 
     return all_deals
 
 
-# ---------- FILTER ----------
+# ---------------- FILTER ----------------
 
 def filter_deals(deals):
 
@@ -251,14 +241,14 @@ def filter_deals(deals):
 
         results.append(d)
 
-    results.sort(key=lambda x: -x["discount"])
+    results.sort(key=lambda x:-x["discount"])
 
     return results
 
 
-# ---------- SEND ----------
+# ---------------- SEND ----------------
 
-def send_deals(chat_id, deals):
+def send_deals(chat_id,deals):
 
     for d in deals:
 
@@ -268,22 +258,20 @@ def send_deals(chat_id, deals):
 {d['title']}
 
 💰 {d['price']} SAR
-🏷 {d['old_price']} SAR
+🏷 {d['old']} SAR
 
 ⭐ {d['rating']} / 5
-
-📦 {d['category']}
 
 {d['link']}
 """
 
         try:
 
-            if d["image"]:
+            if d["img"]:
 
                 updater.bot.send_photo(
                     chat_id,
-                    photo=d["image"],
+                    photo=d["img"],
                     caption=msg
                 )
 
@@ -291,34 +279,34 @@ def send_deals(chat_id, deals):
 
                 updater.bot.send_message(
                     chat_id,
-                    text=msg
+                    msg
                 )
 
         except:
 
             updater.bot.send_message(
                 chat_id,
-                text=msg
+                msg
             )
 
         time.sleep(1)
 
 
-# ---------- TELEGRAM ----------
+# ---------------- TELEGRAM ----------------
 
-def hi_cmd(update: Update, context: CallbackContext):
+def hi_cmd(update:Update,context:CallbackContext):
 
     global is_scanning
 
     if is_scanning:
-        update.message.reply_text("⏳ Bot is searching now...")
+        update.message.reply_text("Bot already scanning...")
         return
 
     is_scanning = True
 
     chat_id = update.effective_chat.id
 
-    update.message.reply_text("🔎 Searching Amazon deals...")
+    update.message.reply_text("Searching 600+ Amazon pages...")
 
     deals = search_all()
 
@@ -326,18 +314,18 @@ def hi_cmd(update: Update, context: CallbackContext):
 
     if not deals:
 
-        update.message.reply_text("❌ No deals found")
+        update.message.reply_text("No deals found")
 
     else:
 
-        send_deals(chat_id, deals)
+        send_deals(chat_id,deals)
 
     save_database()
 
     is_scanning = False
 
 
-# ---------- MAIN ----------
+# ---------------- MAIN ----------------
 
 def main():
 
@@ -345,12 +333,12 @@ def main():
 
     load_database()
 
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    updater = Updater(TELEGRAM_BOT_TOKEN,use_context=True)
 
     dp = updater.dispatcher
 
     dp.add_handler(
-        MessageHandler(Filters.text & ~Filters.command, hi_cmd)
+        MessageHandler(Filters.text & ~Filters.command,hi_cmd)
     )
 
     updater.start_polling()
