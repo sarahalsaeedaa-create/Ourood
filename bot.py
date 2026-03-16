@@ -5,7 +5,6 @@ import time
 import random
 import hashlib
 import logging
-import threading
 
 import cloudscraper
 from bs4 import BeautifulSoup
@@ -14,11 +13,11 @@ from fake_useragent import UserAgent
 from telegram import Update
 from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
-# ---------------- SETTINGS ----------------
+# ---------------- BOT TOKEN ----------------
 
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
 
-# ------------------------------------------
+# -------------------------------------------
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -58,13 +57,16 @@ def save_database():
 # ---------- HELPERS ----------
 
 def create_hash(title):
+
     clean = re.sub(r"[^\w\s]", "", title.lower())
     clean = re.sub(r"\d+", "", clean)
     clean = clean[:40]
+
     return hashlib.md5(clean.encode()).hexdigest()
 
 
 def create_session():
+
     session = cloudscraper.create_scraper()
 
     session.headers.update({
@@ -78,68 +80,54 @@ def create_session():
 def fetch_page(session, url):
 
     for _ in range(3):
+
         try:
+
             r = session.get(url, timeout=25)
+
             if r.status_code == 200:
                 return r.text
+
         except:
             pass
 
-        time.sleep(random.uniform(0.5, 1.2))
+        time.sleep(random.uniform(0.7, 1.5))
 
     return None
 
 
-# ---------- BUILD SEARCH SOURCES ----------
+# ---------- SEARCH SOURCES ----------
 
 def build_categories():
-
-    best = [
-        "electronics","fashion","beauty","watches","shoes",
-        "kitchen","home","computers","mobile","perfumes",
-        "toys","sports","baby","grocery","automotive"
-    ]
 
     keywords = [
         "iphone","ipad","macbook","airpods","apple watch",
         "samsung galaxy","sony headphones","bose headphones",
-        "nike shoes","adidas shoes","puma shoes",
-        "ps5","xbox series","nintendo switch",
-        "lego","barbie","hot wheels",
-        "protein powder","creatine","pre workout",
-        "dyson vacuum","air fryer","nespresso",
-        "bosch tools","dewalt tools",
+        "nike shoes","adidas shoes","ps5","xbox series",
+        "lego","barbie","protein powder","creatine",
+        "dyson vacuum","air fryer","nespresso","bosch tools",
         "treadmill","dumbbells","yoga mat"
     ]
 
     categories = []
 
-    for cat in best:
-        categories.append(
-            (
-                f"https://www.amazon.sa/gp/bestsellers/{cat}",
-                f"BestSeller {cat}"
-            )
-        )
-
     for kw in keywords:
-        for page in range(1, 6):
+
+        for page in range(1,6):
+
             categories.append(
                 (
-                    f"https://www.amazon.sa/s?k={kw}&page={page}&rh=p_8%3A30-99",
-                    f"{kw} p{page}"
+                    f"https://www.amazon.sa/s?k={kw}&page={page}",
+                    f"{kw} page {page}"
                 )
             )
 
-    categories.append(("https://www.amazon.sa/gp/todays-deals", "Today Deals"))
-    categories.append(("https://www.amazon.sa/gp/coupons", "Coupons"))
-    categories.append(("https://www.amazon.sa/outlet", "Outlet"))
-    categories.append(("https://www.amazon.sa/gp/warehouse-deals", "Warehouse"))
+    categories.append(("https://www.amazon.sa/gp/todays-deals","Today Deals"))
 
     return categories
 
 
-# ---------- PARSE ITEMS ----------
+# ---------- PARSE ----------
 
 def parse_items(html, category):
 
@@ -150,6 +138,7 @@ def parse_items(html, category):
     deals = []
 
     for item in items:
+
         try:
 
             title_el = item.select_one("h2 span")
@@ -158,11 +147,33 @@ def parse_items(html, category):
 
             title = title_el.text.strip()
 
-            price_el = item.select_one(".a-price-whole")
+            price_el = item.select_one(".a-price .a-offscreen")
             if not price_el:
                 continue
 
-            price = float(price_el.text.replace(",", ""))
+            price_text = price_el.text.replace(",", "")
+            price = float(re.findall(r"\d+\.?\d*", price_text)[0])
+
+            old_el = item.select_one(".a-text-price .a-offscreen")
+
+            if not old_el:
+                continue
+
+            old_text = old_el.text.replace(",", "")
+            old_price = float(re.findall(r"\d+\.?\d*", old_text)[0])
+
+            if old_price <= price:
+                continue
+
+            discount = int(((old_price - price) / old_price) * 100)
+
+            rating = 0
+            rating_el = item.select_one(".a-icon-alt")
+
+            if rating_el:
+                rating_match = re.search(r"(\d+\.?\d*)", rating_el.text)
+                if rating_match:
+                    rating = float(rating_match.group(1))
 
             link = item.select_one("a")["href"]
 
@@ -172,12 +183,16 @@ def parse_items(html, category):
             img = ""
 
             img_el = item.select_one("img")
+
             if img_el:
                 img = img_el.get("src", "")
 
             deals.append({
                 "title": title,
                 "price": price,
+                "old_price": old_price,
+                "discount": discount,
+                "rating": rating,
                 "link": link,
                 "image": img,
                 "category": category
@@ -191,16 +206,6 @@ def parse_items(html, category):
 
 # ---------- SEARCH ----------
 
-def search_category(session, url, name):
-
-    html = fetch_page(session, url)
-
-    if not html:
-        return []
-
-    return parse_items(html, name)
-
-
 def search_all():
 
     session = create_session()
@@ -208,26 +213,17 @@ def search_all():
     categories = build_categories()
 
     all_deals = []
-    threads = []
-
-    lock = threading.Lock()
-
-    def worker(url, name):
-
-        deals = search_category(session, url, name)
-
-        with lock:
-            all_deals.extend(deals)
 
     for url, name in categories:
 
-        t = threading.Thread(target=worker, args=(url, name))
-        t.start()
+        html = fetch_page(session, url)
 
-        threads.append(t)
+        if not html:
+            continue
 
-    for t in threads:
-        t.join()
+        deals = parse_items(html, name)
+
+        all_deals.extend(deals)
 
     return all_deals
 
@@ -240,13 +236,10 @@ def filter_deals(deals):
 
     for d in deals:
 
-        if d["price"] < 1:
-            d["type"] = "🔥 GLITCH"
+        if d["discount"] < 60:
+            continue
 
-        elif d["price"] < 40:
-            d["type"] = "💰 Cheap Deal"
-
-        else:
+        if d["rating"] < 3:
             continue
 
         h = create_hash(d["title"])
@@ -258,6 +251,8 @@ def filter_deals(deals):
 
         results.append(d)
 
+    results.sort(key=lambda x: -x["discount"])
+
     return results
 
 
@@ -268,11 +263,14 @@ def send_deals(chat_id, deals):
     for d in deals:
 
         msg = f"""
-{d['type']}
+🔥 {d['discount']}% OFF
 
 {d['title']}
 
-💵 {d['price']} SAR
+💰 {d['price']} SAR
+🏷 {d['old_price']} SAR
+
+⭐ {d['rating']} / 5
 
 📦 {d['category']}
 
@@ -282,6 +280,7 @@ def send_deals(chat_id, deals):
         try:
 
             if d["image"]:
+
                 updater.bot.send_photo(
                     chat_id,
                     photo=d["image"],
@@ -312,7 +311,7 @@ def hi_cmd(update: Update, context: CallbackContext):
     global is_scanning
 
     if is_scanning:
-        update.message.reply_text("⏳ Already searching...")
+        update.message.reply_text("⏳ Bot is searching now...")
         return
 
     is_scanning = True
@@ -326,8 +325,11 @@ def hi_cmd(update: Update, context: CallbackContext):
     deals = filter_deals(deals)
 
     if not deals:
-        update.message.reply_text("❌ No good deals found")
+
+        update.message.reply_text("❌ No deals found")
+
     else:
+
         send_deals(chat_id, deals)
 
     save_database()
