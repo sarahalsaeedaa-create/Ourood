@@ -16,7 +16,7 @@ from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 
 # ---------------- SETTINGS ----------------
 
-TELEGRAM_BOT_TOKEN = "PUT_YOUR_BOT_TOKEN_HERE"
+TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
 
 # ------------------------------------------
 
