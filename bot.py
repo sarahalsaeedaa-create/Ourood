@@ -13,16 +13,14 @@ from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
 
 ua = UserAgent()
+
 sent_hashes = set()
 is_scanning = False
 updater = None
 
 
-# ---------------- DATABASE ----------------
-
 def load_database():
     global sent_hashes
-
     if os.path.exists("database.json"):
         try:
             with open("database.json","r") as f:
@@ -40,26 +38,19 @@ def save_database():
         pass
 
 
-# ---------------- HELPERS ----------------
-
 def create_hash(text):
-
     clean = re.sub(r"[^\w\s]","",text.lower())
     clean = re.sub(r"\d+","",clean)
     clean = clean[:40]
-
     return hashlib.md5(clean.encode()).hexdigest()
 
 
 def create_session():
-
     s = cloudscraper.create_scraper()
-
     s.headers.update({
         "User-Agent":ua.random,
         "Accept-Language":"en-US,en;q=0.9"
     })
-
     return s
 
 
@@ -68,12 +59,9 @@ def fetch_page(session,url):
     for _ in range(3):
 
         try:
-
             r = session.get(url,timeout=30)
-
             if r.status_code == 200:
                 return r.text
-
         except:
             pass
 
@@ -82,26 +70,24 @@ def fetch_page(session,url):
     return None
 
 
-# ---------------- BUILD SEARCH ----------------
-
-def build_categories():
+def build_search_urls():
 
     keywords = [
 
-    "iphone","ipad","macbook","airpods","apple watch",
-    "samsung","galaxy","sony headphones","bose",
-    "gaming monitor","mechanical keyboard","gaming mouse",
-    "ps5","xbox","gaming chair","vr headset",
-    "lego","barbie","toys","drone",
-    "nike","adidas","puma","running shoes",
-    "protein powder","creatine","mass gainer",
-    "air fryer","coffee machine","blender",
-    "vacuum cleaner","dyson","robot vacuum",
-    "power tools","drill","tool set",
-    "treadmill","exercise bike","dumbbells",
-    "smart tv","4k tv","oled tv",
-    "ssd","external ssd","hard drive",
-    "router","wifi 6 router","mesh wifi"
+    # ملابس
+    "men t shirt","men hoodie","men jacket","men jeans",
+    "women dress","women blouse","women jeans","women hoodie",
+    "abaya","hijab","women leggings","kids clothes",
+
+    # أحذية
+    "nike shoes","adidas shoes","puma shoes","running shoes",
+    "women sneakers","men sneakers","sandals","boots","heels",
+
+    # جمال وعناية
+    "perfume","makeup","lipstick","foundation",
+    "face cream","face serum","face wash",
+    "hair dryer","hair straightener",
+    "shampoo","conditioner","body lotion","skincare"
 
     ]
 
@@ -109,18 +95,17 @@ def build_categories():
 
     for kw in keywords:
 
-        for page in range(1,16):
+        for page in range(1,41):
 
             urls.append(
                 f"https://www.amazon.sa/s?k={kw}&page={page}"
             )
 
     urls.append("https://www.amazon.sa/gp/todays-deals")
+    urls.append("https://www.amazon.sa/gp/goldbox")
 
     return urls
 
-
-# ---------------- PARSE ----------------
 
 def parse_items(html):
 
@@ -192,13 +177,11 @@ def parse_items(html):
     return deals
 
 
-# ---------------- SEARCH ----------------
-
 def search_all():
 
     session = create_session()
 
-    urls = build_categories()
+    urls = build_search_urls()
 
     all_deals = []
 
@@ -213,12 +196,10 @@ def search_all():
 
         all_deals.extend(deals)
 
-        time.sleep(random.uniform(0.4,1.0))
+        time.sleep(random.uniform(0.3,1))
 
     return all_deals
 
-
-# ---------------- FILTER ----------------
 
 def filter_deals(deals):
 
@@ -245,8 +226,6 @@ def filter_deals(deals):
 
     return results
 
-
-# ---------------- SEND ----------------
 
 def send_deals(chat_id,deals):
 
@@ -277,55 +256,63 @@ def send_deals(chat_id,deals):
 
             else:
 
-                updater.bot.send_message(
-                    chat_id,
-                    msg
-                )
+                updater.bot.send_message(chat_id,msg)
 
         except:
 
-            updater.bot.send_message(
-                chat_id,
-                msg
-            )
+            updater.bot.send_message(chat_id,msg)
 
         time.sleep(1)
 
 
-# ---------------- TELEGRAM ----------------
+def daily_scan(context):
 
-def hi_cmd(update:Update,context:CallbackContext):
+    global sent_hashes
 
-    global is_scanning
+    chat_id = context.job.context
 
-    if is_scanning:
-        update.message.reply_text("Bot already scanning...")
-        return
+    context.bot.send_message(
+        chat_id,
+        "🔎 البحث اليومي عن عروض Amazon..."
+    )
 
-    is_scanning = True
-
-    chat_id = update.effective_chat.id
-
-    update.message.reply_text("Searching 600+ Amazon pages...")
+    sent_hashes.clear()
 
     deals = search_all()
 
     deals = filter_deals(deals)
 
-    if not deals:
-
-        update.message.reply_text("No deals found")
-
-    else:
+    if deals:
 
         send_deals(chat_id,deals)
 
+    else:
+
+        context.bot.send_message(
+            chat_id,
+            "❌ لا توجد عروض قوية اليوم"
+        )
+
     save_database()
 
-    is_scanning = False
 
+def hi_cmd(update:Update,context:CallbackContext):
 
-# ---------------- MAIN ----------------
+    chat_id = update.effective_chat.id
+
+    update.message.reply_text(
+        "✅ تم تفعيل العروض اليومية\nسيتم إرسال أفضل العروض كل يوم."
+    )
+
+    job_queue = context.job_queue
+
+    job_queue.run_repeating(
+        daily_scan,
+        interval=86400,
+        first=10,
+        context=chat_id
+    )
+
 
 def main():
 
