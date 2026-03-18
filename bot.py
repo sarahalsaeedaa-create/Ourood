@@ -50,26 +50,53 @@ def fetch_page(session,url):
         return None
 
 
+# 🔥 كلمات بحث ضخمة (أهم تعديل)
 def build_urls():
 
     keywords = [
 
-    # كل الأقسام
-    "men clothes","women clothes","abaya","kids clothes",
-    "nike shoes","running shoes",
-    "makeup","skincare","perfume",
-    "iphone","samsung phone",
-    "phone case","charger","power bank",
-    "laptop","headphones","speaker",
-    "chocolate","coffee",
-    "baby toys","lego","diapers"
+    # 👕 ملابس
+    "men t shirt","men hoodie","men jacket","men jeans","men shorts",
+    "women dress","women blouse","women jeans","abaya","hijab",
+    "kids clothes","baby clothes","sportswear","gym clothes",
+
+    # 👟 أحذية
+    "nike shoes","adidas shoes","puma shoes","running shoes",
+    "basketball shoes","training shoes","boots","heels","sandals",
+
+    # 💄 جمال
+    "makeup","lipstick","foundation","skincare","face cream",
+    "face serum","face wash","moisturizer","hair care",
+    "shampoo","conditioner","perfume","body lotion",
+
+    # 📱 جوالات
+    "iphone","iphone 13","iphone 14","iphone 15",
+    "samsung phone","samsung galaxy","android phone","xiaomi phone",
+
+    # 🔌 اكسسوارات موبايل
+    "phone case","iphone case","charger","fast charger",
+    "power bank","screen protector","wireless charger",
+    "earbuds","bluetooth earbuds","airpods",
+
+    # 🎧 إلكترونيات
+    "laptop","gaming laptop","tablet","ipad",
+    "smart tv","android tv","headphones",
+    "bluetooth speaker","gaming headset","monitor",
+
+    # 🍫 طعام
+    "chocolate","snacks","protein bar","coffee","tea",
+    "energy drink","biscuits","chips","dates","nuts",
+
+    # 🧸 أطفال
+    "baby toys","kids toys","lego","baby products",
+    "diapers","baby stroller","baby bottle","kids games"
 
     ]
 
     urls = []
 
     for kw in keywords:
-        for page in range(1,20):
+        for page in range(1,30):   # زودنا الصفحات
             urls.append(f"https://www.amazon.sa/s?k={kw}&page={page}")
 
     urls.append("https://www.amazon.sa/gp/todays-deals")
@@ -134,6 +161,7 @@ def search_all():
     all_deals = []
 
     for url in urls:
+
         html = fetch_page(session,url)
 
         if not html:
@@ -142,7 +170,7 @@ def search_all():
         deals = parse_items(html)
         all_deals.extend(deals)
 
-        time.sleep(random.uniform(0.3,0.7))
+        time.sleep(random.uniform(0.2,0.6))
 
     return all_deals
 
@@ -158,6 +186,7 @@ def filter_deals(deals):
             continue
 
         h = create_hash(d["title"])
+
         if h in sent_hashes:
             continue
 
@@ -165,7 +194,6 @@ def filter_deals(deals):
 
         if d["discount"] >= 90:
             glitch.append(d)
-
         elif d["discount"] >= 60:
             normal.append(d)
 
@@ -209,13 +237,13 @@ def hi_cmd(update:Update,context:CallbackContext):
 
     chat_id = update.effective_chat.id
 
-    update.message.reply_text("🔎 جاري البحث عن الجليتش والعروض القوية...")
+    update.message.reply_text("🔎 بحث ضخم جاري... انتظر النتائج 🔥")
 
     deals = search_all()
 
     glitch, normal = filter_deals(deals)
 
-    send_group(chat_id,glitch,"💣 GLITCH DEALS 90%+")
+    send_group(chat_id,glitch,"💣 GLITCH 90%+")
     send_group(chat_id,normal,"🔥 BEST DEALS 60%+")
 
     if not glitch and not normal:
