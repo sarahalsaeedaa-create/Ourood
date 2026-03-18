@@ -13,96 +13,66 @@ from telegram.ext import Updater, MessageHandler, Filters, CallbackContext
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
 
 ua = UserAgent()
-
 sent_hashes = set()
-is_scanning = False
 updater = None
 
 
 def load_database():
     global sent_hashes
     if os.path.exists("database.json"):
-        try:
-            with open("database.json","r") as f:
-                data = json.load(f)
-                sent_hashes = set(data.get("hashes",[]))
-        except:
-            pass
+        with open("database.json","r") as f:
+            sent_hashes = set(json.load(f).get("hashes",[]))
 
 
 def save_database():
-    try:
-        with open("database.json","w") as f:
-            json.dump({"hashes":list(sent_hashes)},f)
-    except:
-        pass
+    with open("database.json","w") as f:
+        json.dump({"hashes":list(sent_hashes)},f)
 
 
 def create_hash(text):
-    clean = re.sub(r"[^\w\s]","",text.lower())
-    clean = re.sub(r"\d+","",clean)
-    clean = clean[:40]
-    return hashlib.md5(clean.encode()).hexdigest()
+    text = re.sub(r"[^\w\s]","",text.lower())
+    text = re.sub(r"\d+","",text)
+    return hashlib.md5(text[:40].encode()).hexdigest()
 
 
 def create_session():
     s = cloudscraper.create_scraper()
-    s.headers.update({
-        "User-Agent":ua.random,
-        "Accept-Language":"en-US,en;q=0.9"
-    })
+    s.headers.update({"User-Agent":ua.random})
     return s
 
 
 def fetch_page(session,url):
-
-    for _ in range(3):
-
-        try:
-            r = session.get(url,timeout=30)
-            if r.status_code == 200:
-                return r.text
-        except:
-            pass
-
-        time.sleep(random.uniform(0.5,1.5))
-
-    return None
+    try:
+        r = session.get(url,timeout=25)
+        if r.status_code == 200:
+            return r.text
+    except:
+        return None
 
 
-def build_search_urls():
+def build_urls():
 
     keywords = [
 
-    # ملابس
-    "men t shirt","men hoodie","men jacket","men jeans",
-    "women dress","women blouse","women jeans","women hoodie",
-    "abaya","hijab","women leggings","kids clothes",
-
-    # أحذية
-    "nike shoes","adidas shoes","puma shoes","running shoes",
-    "women sneakers","men sneakers","sandals","boots","heels",
-
-    # جمال وعناية
-    "perfume","makeup","lipstick","foundation",
-    "face cream","face serum","face wash",
-    "hair dryer","hair straightener",
-    "shampoo","conditioner","body lotion","skincare"
+    # كل الأقسام
+    "men clothes","women clothes","abaya","kids clothes",
+    "nike shoes","running shoes",
+    "makeup","skincare","perfume",
+    "iphone","samsung phone",
+    "phone case","charger","power bank",
+    "laptop","headphones","speaker",
+    "chocolate","coffee",
+    "baby toys","lego","diapers"
 
     ]
 
     urls = []
 
     for kw in keywords:
-
-        for page in range(1,41):
-
-            urls.append(
-                f"https://www.amazon.sa/s?k={kw}&page={page}"
-            )
+        for page in range(1,20):
+            urls.append(f"https://www.amazon.sa/s?k={kw}&page={page}")
 
     urls.append("https://www.amazon.sa/gp/todays-deals")
-    urls.append("https://www.amazon.sa/gp/goldbox")
 
     return urls
 
@@ -110,32 +80,20 @@ def build_search_urls():
 def parse_items(html):
 
     soup = BeautifulSoup(html,"html.parser")
-
     items = soup.find_all("div",{"data-component-type":"s-search-result"})
-
     deals = []
 
     for item in items:
-
         try:
+            title = item.select_one("h2 span").text.strip()
 
-            title_el = item.select_one("h2 span")
-            if not title_el:
+            price = float(re.findall(r"\d+\.?\d*",item.select_one(".a-price .a-offscreen").text)[0])
+
+            old = item.select_one(".a-text-price .a-offscreen")
+            if not old:
                 continue
 
-            title = title_el.text.strip()
-
-            price_el = item.select_one(".a-price .a-offscreen")
-            if not price_el:
-                continue
-
-            price = float(re.findall(r"\d+\.?\d*",price_el.text)[0])
-
-            old_el = item.select_one(".a-text-price .a-offscreen")
-            if not old_el:
-                continue
-
-            old_price = float(re.findall(r"\d+\.?\d*",old_el.text)[0])
+            old_price = float(re.findall(r"\d+\.?\d*",old.text)[0])
 
             if old_price <= price:
                 continue
@@ -143,23 +101,15 @@ def parse_items(html):
             discount = int(((old_price-price)/old_price)*100)
 
             rating = 0
-            rating_el = item.select_one(".a-icon-alt")
-
-            if rating_el:
-                m = re.search(r"(\d+\.?\d*)",rating_el.text)
-                if m:
-                    rating = float(m.group(1))
+            r = item.select_one(".a-icon-alt")
+            if r:
+                rating = float(re.findall(r"\d+\.?\d*",r.text)[0])
 
             link = item.select_one("a")["href"]
-
             if link.startswith("/"):
                 link = "https://www.amazon.sa"+link
 
-            img = ""
-            img_el = item.select_one("img")
-
-            if img_el:
-                img = img_el.get("src","")
+            img = item.select_one("img").get("src","")
 
             deals.append({
                 "title":title,
@@ -180,54 +130,57 @@ def parse_items(html):
 def search_all():
 
     session = create_session()
-
-    urls = build_search_urls()
-
+    urls = build_urls()
     all_deals = []
 
     for url in urls:
-
         html = fetch_page(session,url)
 
         if not html:
             continue
 
         deals = parse_items(html)
-
         all_deals.extend(deals)
 
-        time.sleep(random.uniform(0.3,1))
+        time.sleep(random.uniform(0.3,0.7))
 
     return all_deals
 
 
 def filter_deals(deals):
 
-    results = []
+    glitch = []
+    normal = []
 
     for d in deals:
-
-        if d["discount"] < 60:
-            continue
 
         if d["rating"] < 3:
             continue
 
         h = create_hash(d["title"])
-
         if h in sent_hashes:
             continue
 
         sent_hashes.add(h)
 
-        results.append(d)
+        if d["discount"] >= 90:
+            glitch.append(d)
 
-    results.sort(key=lambda x:-x["discount"])
+        elif d["discount"] >= 60:
+            normal.append(d)
 
-    return results
+    glitch.sort(key=lambda x:-x["discount"])
+    normal.sort(key=lambda x:-x["discount"])
+
+    return glitch, normal
 
 
-def send_deals(chat_id,deals):
+def send_group(chat_id,deals,title):
+
+    if not deals:
+        return
+
+    updater.bot.send_message(chat_id,title)
 
     for d in deals:
 
@@ -239,79 +192,36 @@ def send_deals(chat_id,deals):
 💰 {d['price']} SAR
 🏷 {d['old']} SAR
 
-⭐ {d['rating']} / 5
+⭐ {d['rating']}
 
 {d['link']}
 """
 
         try:
-
-            if d["img"]:
-
-                updater.bot.send_photo(
-                    chat_id,
-                    photo=d["img"],
-                    caption=msg
-                )
-
-            else:
-
-                updater.bot.send_message(chat_id,msg)
-
+            updater.bot.send_photo(chat_id,photo=d["img"],caption=msg)
         except:
-
             updater.bot.send_message(chat_id,msg)
 
         time.sleep(1)
-
-
-def daily_scan(context):
-
-    global sent_hashes
-
-    chat_id = context.job.context
-
-    context.bot.send_message(
-        chat_id,
-        "🔎 البحث اليومي عن عروض Amazon..."
-    )
-
-    sent_hashes.clear()
-
-    deals = search_all()
-
-    deals = filter_deals(deals)
-
-    if deals:
-
-        send_deals(chat_id,deals)
-
-    else:
-
-        context.bot.send_message(
-            chat_id,
-            "❌ لا توجد عروض قوية اليوم"
-        )
-
-    save_database()
 
 
 def hi_cmd(update:Update,context:CallbackContext):
 
     chat_id = update.effective_chat.id
 
-    update.message.reply_text(
-        "✅ تم تفعيل العروض اليومية\nسيتم إرسال أفضل العروض كل يوم."
-    )
+    update.message.reply_text("🔎 جاري البحث عن الجليتش والعروض القوية...")
 
-    job_queue = context.job_queue
+    deals = search_all()
 
-    job_queue.run_repeating(
-        daily_scan,
-        interval=86400,
-        first=10,
-        context=chat_id
-    )
+    glitch, normal = filter_deals(deals)
+
+    send_group(chat_id,glitch,"💣 GLITCH DEALS 90%+")
+    send_group(chat_id,normal,"🔥 BEST DEALS 60%+")
+
+    if not glitch and not normal:
+        update.message.reply_text("❌ لا يوجد عروض حالياً")
+
+    save_database()
 
 
 def main():
@@ -324,9 +234,7 @@ def main():
 
     dp = updater.dispatcher
 
-    dp.add_handler(
-        MessageHandler(Filters.text & ~Filters.command,hi_cmd)
-    )
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command,hi_cmd))
 
     updater.start_polling()
 
