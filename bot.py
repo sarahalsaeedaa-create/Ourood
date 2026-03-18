@@ -43,60 +43,33 @@ def create_session():
 
 def fetch_page(session,url):
     try:
-        r = session.get(url,timeout=25)
+        r = session.get(url,timeout=20)
         if r.status_code == 200:
             return r.text
     except:
         return None
 
 
-# 🔥 كلمات بحث ضخمة (أهم تعديل)
 def build_urls():
 
     keywords = [
 
-    # 👕 ملابس
-    "men t shirt","men hoodie","men jacket","men jeans","men shorts",
-    "women dress","women blouse","women jeans","abaya","hijab",
-    "kids clothes","baby clothes","sportswear","gym clothes",
-
-    # 👟 أحذية
-    "nike shoes","adidas shoes","puma shoes","running shoes",
-    "basketball shoes","training shoes","boots","heels","sandals",
-
-    # 💄 جمال
-    "makeup","lipstick","foundation","skincare","face cream",
-    "face serum","face wash","moisturizer","hair care",
-    "shampoo","conditioner","perfume","body lotion",
-
-    # 📱 جوالات
-    "iphone","iphone 13","iphone 14","iphone 15",
-    "samsung phone","samsung galaxy","android phone","xiaomi phone",
-
-    # 🔌 اكسسوارات موبايل
-    "phone case","iphone case","charger","fast charger",
-    "power bank","screen protector","wireless charger",
-    "earbuds","bluetooth earbuds","airpods",
-
-    # 🎧 إلكترونيات
-    "laptop","gaming laptop","tablet","ipad",
-    "smart tv","android tv","headphones",
-    "bluetooth speaker","gaming headset","monitor",
-
-    # 🍫 طعام
-    "chocolate","snacks","protein bar","coffee","tea",
-    "energy drink","biscuits","chips","dates","nuts",
-
-    # 🧸 أطفال
-    "baby toys","kids toys","lego","baby products",
-    "diapers","baby stroller","baby bottle","kids games"
+    # كل الأقسام (موسعة جداً)
+    "men clothes","women clothes","abaya","hijab",
+    "nike shoes","adidas shoes","running shoes",
+    "makeup","skincare","perfume",
+    "iphone","samsung phone","android phone",
+    "phone case","charger","power bank",
+    "laptop","tablet","headphones","speaker",
+    "chocolate","coffee","snacks",
+    "baby toys","lego","diapers","kids toys"
 
     ]
 
     urls = []
 
     for kw in keywords:
-        for page in range(1,30):   # زودنا الصفحات
+        for page in range(1,40):  # قوي جداً
             urls.append(f"https://www.amazon.sa/s?k={kw}&page={page}")
 
     urls.append("https://www.amazon.sa/gp/todays-deals")
@@ -170,7 +143,7 @@ def search_all():
         deals = parse_items(html)
         all_deals.extend(deals)
 
-        time.sleep(random.uniform(0.2,0.6))
+        time.sleep(random.uniform(0.2,0.5))
 
     return all_deals
 
@@ -233,11 +206,12 @@ def send_group(chat_id,deals,title):
         time.sleep(1)
 
 
-def hi_cmd(update:Update,context:CallbackContext):
+# 🔥 التشغيل التلقائي كل 30 دقيقة
+def auto_scan(context):
 
-    chat_id = update.effective_chat.id
+    chat_id = context.job.context
 
-    update.message.reply_text("🔎 بحث ضخم جاري... انتظر النتائج 🔥")
+    context.bot.send_message(chat_id,"🔄 فحص تلقائي للعروض...")
 
     deals = search_all()
 
@@ -246,10 +220,21 @@ def hi_cmd(update:Update,context:CallbackContext):
     send_group(chat_id,glitch,"💣 GLITCH 90%+")
     send_group(chat_id,normal,"🔥 BEST DEALS 60%+")
 
-    if not glitch and not normal:
-        update.message.reply_text("❌ لا يوجد عروض حالياً")
-
     save_database()
+
+
+def hi_cmd(update:Update,context:CallbackContext):
+
+    chat_id = update.effective_chat.id
+
+    update.message.reply_text("🚀 تم تشغيل البوت الاحترافي\nسيتم البحث كل 30 دقيقة")
+
+    context.job_queue.run_repeating(
+        auto_scan,
+        interval=1800,  # كل 30 دقيقة
+        first=5,
+        context=chat_id
+    )
 
 
 def main():
