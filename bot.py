@@ -50,38 +50,43 @@ def fetch_page(session,url):
         return None
 
 
-# 🔥 كلمات مضاعفة جداً
+# 🔥 كلمات ضخمة جداً
 def build_urls():
 
     keywords = [
 
     # 👕 ملابس
     "men t shirt","men hoodie","men jacket","men jeans","men shorts",
-    "women dress","women blouse","abaya","hijab","women leggings",
+    "men tracksuit","men underwear","men pajamas",
+    "women dress","evening dress","summer dress","abaya","hijab",
+    "women blouse","women jeans","women leggings","women skirt",
     "kids clothes","baby clothes","sportswear","gym clothes",
 
     # 👟 أحذية
-    "nike shoes","adidas shoes","puma shoes","running shoes",
-    "basketball shoes","training shoes","boots","heels","sandals",
-    "kids shoes","slippers","flip flops",
+    "nike shoes","adidas shoes","puma shoes","reebok shoes",
+    "running shoes","walking shoes","basketball shoes",
+    "training shoes","boots","heels","sandals","slippers",
+    "flip flops","kids shoes","baby shoes",
 
     # 💄 جمال
-    "makeup","lipstick","foundation","skincare","face cream",
-    "face serum","face wash","moisturizer","hair care",
-    "shampoo","conditioner","perfume","body lotion",
-    "hair oil","hair mask","beauty tools",
+    "makeup","lipstick","foundation","concealer","skincare",
+    "face cream","face serum","face wash","cleanser",
+    "moisturizer","night cream","sunscreen",
+    "perfume","men perfume","women perfume",
+    "hair care","shampoo","conditioner","hair oil",
+    "hair dryer","hair straightener","beauty tools",
 
     # 📱 جوالات
-    "iphone","iphone 11","iphone 12","iphone 13","iphone 14",
-    "samsung phone","galaxy s","android phone","xiaomi phone",
-    "oppo phone","realme phone",
+    "iphone","iphone 11","iphone 12","iphone 13","iphone 14","iphone 15",
+    "samsung galaxy","android phone","xiaomi phone","oppo phone",
+    "realme phone","used phone","renewed phone",
 
     # 🔌 اكسسوارات
-    "phone case","iphone case","samsung case",
-    "charger","fast charger","usb c charger",
+    "phone case","iphone case","charger","fast charger",
     "power bank","wireless charger","car charger",
     "screen protector","tempered glass",
-    "earbuds","bluetooth earbuds","airpods","headset",
+    "earbuds","bluetooth earbuds","airpods",
+    "phone holder","tripod","ring light",
 
     # 🎧 إلكترونيات
     "laptop","gaming laptop","tablet","ipad",
@@ -105,7 +110,7 @@ def build_urls():
     urls = []
 
     for kw in keywords:
-        for page in range(1,35):  # صفحات أكتر
+        for page in range(1, 40):  # 🔥 عدد صفحات كبير
             urls.append(f"https://www.amazon.sa/s?k={kw}&page={page}")
 
     urls.append("https://www.amazon.sa/gp/todays-deals")
@@ -246,7 +251,7 @@ def hi_cmd(update:Update,context:CallbackContext):
 
     chat_id = update.effective_chat.id
 
-    update.message.reply_text("🔎 جاري البحث عن أقوى العروض...")
+    update.message.reply_text("🔎 بحث ضخم جداً جاري... انتظر 🔥")
 
     deals = search_all()
 
