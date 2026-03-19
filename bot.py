@@ -50,26 +50,62 @@ def fetch_page(session,url):
         return None
 
 
+# 🔥 كلمات مضاعفة جداً
 def build_urls():
 
     keywords = [
 
-    # كل الأقسام (موسعة جداً)
-    "men clothes","women clothes","abaya","hijab",
-    "nike shoes","adidas shoes","running shoes",
-    "makeup","skincare","perfume",
-    "iphone","samsung phone","android phone",
-    "phone case","charger","power bank",
-    "laptop","tablet","headphones","speaker",
-    "chocolate","coffee","snacks",
-    "baby toys","lego","diapers","kids toys"
+    # 👕 ملابس
+    "men t shirt","men hoodie","men jacket","men jeans","men shorts",
+    "women dress","women blouse","abaya","hijab","women leggings",
+    "kids clothes","baby clothes","sportswear","gym clothes",
+
+    # 👟 أحذية
+    "nike shoes","adidas shoes","puma shoes","running shoes",
+    "basketball shoes","training shoes","boots","heels","sandals",
+    "kids shoes","slippers","flip flops",
+
+    # 💄 جمال
+    "makeup","lipstick","foundation","skincare","face cream",
+    "face serum","face wash","moisturizer","hair care",
+    "shampoo","conditioner","perfume","body lotion",
+    "hair oil","hair mask","beauty tools",
+
+    # 📱 جوالات
+    "iphone","iphone 11","iphone 12","iphone 13","iphone 14",
+    "samsung phone","galaxy s","android phone","xiaomi phone",
+    "oppo phone","realme phone",
+
+    # 🔌 اكسسوارات
+    "phone case","iphone case","samsung case",
+    "charger","fast charger","usb c charger",
+    "power bank","wireless charger","car charger",
+    "screen protector","tempered glass",
+    "earbuds","bluetooth earbuds","airpods","headset",
+
+    # 🎧 إلكترونيات
+    "laptop","gaming laptop","tablet","ipad",
+    "smart tv","android tv","4k tv",
+    "headphones","bluetooth headphones","speaker",
+    "gaming mouse","keyboard","monitor","webcam",
+
+    # 🍫 طعام
+    "chocolate","snacks","protein bar","coffee","tea",
+    "energy drink","biscuits","chips","dates","nuts",
+    "honey","peanut butter","granola",
+
+    # 🧸 أطفال
+    "baby toys","kids toys","lego","puzzle",
+    "educational toys","remote car",
+    "baby products","baby stroller","baby bottle",
+    "diapers","baby wipes","baby milk"
 
     ]
 
     urls = []
 
     for kw in keywords:
-        for page in range(1,40):  # قوي جداً
+        for page in range(1,35):  # صفحات أكتر
             urls.append(f"https://www.amazon.sa/s?k={kw}&page={page}")
 
     urls.append("https://www.amazon.sa/gp/todays-deals")
@@ -206,12 +242,11 @@ def send_group(chat_id,deals,title):
         time.sleep(1)
 
 
-# 🔥 التشغيل التلقائي كل 30 دقيقة
-def auto_scan(context):
+def hi_cmd(update:Update,context:CallbackContext):
 
-    chat_id = context.job.context
+    chat_id = update.effective_chat.id
 
-    context.bot.send_message(chat_id,"🔄 فحص تلقائي للعروض...")
+    update.message.reply_text("🔎 جاري البحث عن أقوى العروض...")
 
     deals = search_all()
 
@@ -220,21 +255,10 @@ def auto_scan(context):
     send_group(chat_id,glitch,"💣 GLITCH 90%+")
     send_group(chat_id,normal,"🔥 BEST DEALS 60%+")
 
+    if not glitch and not normal:
+        update.message.reply_text("❌ لا يوجد عروض حالياً")
+
     save_database()
-
-
-def hi_cmd(update:Update,context:CallbackContext):
-
-    chat_id = update.effective_chat.id
-
-    update.message.reply_text("🚀 تم تشغيل البوت الاحترافي\nسيتم البحث كل 30 دقيقة")
-
-    context.job_queue.run_repeating(
-        auto_scan,
-        interval=1800,  # كل 30 دقيقة
-        first=5,
-        context=chat_id
-    )
 
 
 def main():
@@ -247,7 +271,7 @@ def main():
 
     dp = updater.dispatcher
 
-    dp.add_handler(MessageHandler(Filters.text & ~Filters.command,hi_cmd))
+    dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$'), hi_cmd))
 
     updater.start_polling()
 
