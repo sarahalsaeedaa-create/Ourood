@@ -55,57 +55,135 @@ def build_urls():
 
     keywords = [
 
-    # 👕 ملابس
-    "men t shirt","men hoodie","men jacket","men jeans","men shorts",
-    "men tracksuit","men underwear","men pajamas",
-    "women dress","evening dress","summer dress","abaya","hijab",
-    "women blouse","women jeans","women leggings","women skirt",
-    "kids clothes","baby clothes","sportswear","gym clothes",
+# 👕 ملابس رجالي
+"men t shirt","plain t shirt","graphic t shirt","oversized t shirt",
+"men hoodie","zip hoodie","sweatshirt","men jacket","winter jacket",
+"leather jacket","denim jacket","men jeans","slim jeans","baggy jeans",
+"cargo pants","joggers","shorts men","swim shorts","underwear men",
+"boxers","briefs","pajamas men","tracksuit","gym wear men",
 
-    # 👟 أحذية
-    "nike shoes","adidas shoes","puma shoes","reebok shoes",
-    "running shoes","walking shoes","basketball shoes",
-    "training shoes","boots","heels","sandals","slippers",
-    "flip flops","kids shoes","baby shoes",
+# 👗 ملابس حريمي
+"women dress","evening dress","party dress","maxi dress","summer dress",
+"abaya","abaya women","hijab","scarf","women blouse","crop top",
+"women t shirt","women jeans","skinny jeans women","leggings",
+"yoga pants","skirts","mini skirt","long skirt","nightwear women",
 
-    # 💄 جمال
-    "makeup","lipstick","foundation","concealer","skincare",
-    "face cream","face serum","face wash","cleanser",
-    "moisturizer","night cream","sunscreen",
-    "perfume","men perfume","women perfume",
-    "hair care","shampoo","conditioner","hair oil",
-    "hair dryer","hair straightener","beauty tools",
+# 👶 ملابس أطفال
+"kids clothes","baby clothes","baby set","baby outfit",
+"kids t shirt","kids hoodie","kids jeans","kids dress",
+"school uniform","baby pajamas",
 
-    # 📱 جوالات
-    "iphone","iphone 11","iphone 12","iphone 13","iphone 14","iphone 15",
-    "samsung galaxy","android phone","xiaomi phone","oppo phone",
-    "realme phone","used phone","renewed phone",
+# 👟 أحذية
+"nike shoes","adidas shoes","puma shoes","reebok shoes",
+"running shoes","walking shoes","training shoes",
+"basketball shoes","football shoes","boots","ankle boots",
+"heels","high heels","sandals","slippers","flip flops",
+"crocs","kids shoes","baby shoes","school shoes",
 
-    # 🔌 اكسسوارات
-    "phone case","iphone case","charger","fast charger",
-    "power bank","wireless charger","car charger",
-    "screen protector","tempered glass",
-    "earbuds","bluetooth earbuds","airpods",
-    "phone holder","tripod","ring light",
+# 💄 مكياج
+"makeup kit","lipstick matte","liquid lipstick",
+"foundation full coverage","concealer makeup",
+"face powder","setting spray","makeup brush set",
+"beauty blender","eyeliner","mascara waterproof",
+"eyeshadow palette","highlighter makeup","blush makeup",
 
-    # 🎧 إلكترونيات
-    "laptop","gaming laptop","tablet","ipad",
-    "smart tv","android tv","4k tv",
-    "headphones","bluetooth headphones","speaker",
-    "gaming mouse","keyboard","monitor","webcam",
+# 🧴 عناية بالبشرة
+"skincare set","face cream","face serum vitamin c",
+"hyaluronic acid serum","retinol cream",
+"cleanser face","face wash","moisturizer",
+"sunscreen spf 50","night cream","anti aging cream",
+"eye cream","face mask","peeling solution",
 
-    # 🍫 طعام
-    "chocolate","snacks","protein bar","coffee","tea",
-    "energy drink","biscuits","chips","dates","nuts",
-    "honey","peanut butter","granola",
+# 💇‍♀️ عناية بالشعر
+"shampoo","conditioner","hair oil","argan oil",
+"hair mask","keratin treatment","hair serum",
+"hair dryer","hair straightener","hair curler",
+"hair brush","scalp massager",
 
-    # 🧸 أطفال
-    "baby toys","kids toys","lego","puzzle",
-    "educational toys","remote car",
-    "baby products","baby stroller","baby bottle",
-    "diapers","baby wipes","baby milk"
+# 🌸 عطور
+"perfume","men perfume","women perfume",
+"arabic perfume","oud perfume","luxury perfume",
+"gift perfume set","body spray","deodorant",
+
+# 📱 جوالات
+"iphone","iphone 11","iphone 12","iphone 13","iphone 14","iphone 15",
+"iphone pro max","renewed iphone","used iphone",
+"samsung galaxy","galaxy s21","s22","s23","s24",
+"android phone","xiaomi phone","redmi phone",
+"oppo phone","realme phone","huawei phone",
+
+# 🔌 اكسسوارات موبايل
+"phone case","iphone case","clear case","shockproof case",
+"charger","fast charger","usb c charger",
+"wireless charger","magnetic charger",
+"power bank","20000mah power bank",
+"car charger","phone holder car",
+"screen protector","tempered glass",
+"camera protector","ring light phone",
+"tripod phone","selfie stick",
+
+# 🎧 صوتيات
+"earbuds","bluetooth earbuds","wireless earbuds",
+"airpods","noise cancelling headphones",
+"gaming headset","speaker bluetooth",
+"portable speaker","soundbar",
+
+# 💻 إلكترونيات
+"laptop","gaming laptop","cheap laptop",
+"tablet","ipad","android tablet",
+"smart tv","4k tv","android tv box",
+"monitor","gaming monitor","keyboard",
+"mechanical keyboard","gaming mouse",
+"webcam","printer","router wifi",
+
+# 🎮 جيمينج
+"gaming mouse","gaming keyboard","gaming chair",
+"ps5","playstation 5","xbox series x",
+"nintendo switch","gaming headset",
+"rgb keyboard","gaming desk",
+
+# 🍫 طعام
+"chocolate","dark chocolate","milk chocolate",
+"snacks","chips","biscuits","cookies",
+"protein bar","granola bar","energy bar",
+"coffee","instant coffee","espresso",
+"tea","green tea","matcha",
+"dates","saudi dates","ajwa dates",
+"nuts","almonds","cashew","pistachio",
+"honey","natural honey","peanut butter",
+
+# 👶 أطفال
+"baby toys","kids toys","educational toys",
+"lego","lego sets","puzzle kids",
+"remote control car","rc car",
+"baby stroller","baby car seat",
+"baby bottle","feeding bottle",
+"baby milk","formula milk",
+"diapers","pampers","baby wipes",
+
+# 🏠 منزل
+"air fryer","philips air fryer","ninja air fryer",
+"blender","coffee machine","espresso machine",
+"vacuum cleaner","robot vacuum",
+"washing machine","microwave",
+"kitchen tools","cookware set",
+
+# 🏋️ رياضة
+"fitness equipment","dumbbells","kettlebell",
+"yoga mat","resistance bands",
+"treadmill","exercise bike",
+"protein powder","whey protein",
+"creatine","pre workout",
+
+# 🔥 كلمات عروض قوية
+"discount","clearance","big sale","mega sale",
+"flash sale","limited time offer",
+"deal of the day","best price",
+"cheap","lowest price","hot deal",
+"special offer","super sale","final sale"
 
     ]
+
 
     urls = []
 
