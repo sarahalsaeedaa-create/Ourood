@@ -159,28 +159,142 @@ def build_urls():
 "baby stroller","baby car seat",
 "baby bottle","feeding bottle",
 "baby milk","formula milk",
-"diapers","pampers","baby wipes",
+keywords = [
 
-# 🏠 منزل
-"air fryer","philips air fryer","ninja air fryer",
-"blender","coffee machine","espresso machine",
-"vacuum cleaner","robot vacuum",
-"washing machine","microwave",
-"kitchen tools","cookware set",
+# 🔥 كلمات جليتش / عروض مخفية
+"price error","pricing error","glitch deal","wrong price",
+"mistake price","super discount","crazy deal","insane deal",
+"unbelievable deal","hidden deal","secret deal",
+"warehouse deal","refurbished","renewed","open box",
+"like new","used like new","clearance sale","liquidation sale",
 
-# 🏋️ رياضة
-"fitness equipment","dumbbells","kettlebell",
-"yoga mat","resistance bands",
-"treadmill","exercise bike",
-"protein powder","whey protein",
-"creatine","pre workout",
+# 👕 ملابس (تفصيل قوي)
+"oversized hoodie","streetwear hoodie","graphic hoodie",
+"zip up hoodie","heavyweight hoodie","fleece hoodie",
+"baggy jeans","ripped jeans","distressed jeans",
+"cargo pants men","cargo pants women",
+"tracksuit set","gym outfit","athleisure wear",
+"compression shirt","thermal wear","winter clothes",
+"summer clothes","beach wear","swimwear","bikini set",
 
-# 🔥 كلمات عروض قوية
-"discount","clearance","big sale","mega sale",
-"flash sale","limited time offer",
-"deal of the day","best price",
-"cheap","lowest price","hot deal",
-"special offer","super sale","final sale"
+# 👗 نسائي (ترند)
+"bodycon dress","cocktail dress","prom dress",
+"abaya luxury","abaya embroidered",
+"hijab chiffon","hijab cotton","turban scarf",
+"loungewear women","homewear set","sleepwear",
+"lingerie set","sports bra","yoga outfit",
+
+# 👟 أحذية متقدمة
+"sneakers","chunky sneakers","running sneakers",
+"retro sneakers","limited sneakers",
+"gym shoes","training sneakers",
+"hiking boots","combat boots",
+"luxury shoes","designer shoes",
+
+# 💄 مكياج احترافي
+"full makeup kit professional","makeup palette",
+"hd foundation","matte foundation","bb cream",
+"cc cream","primer makeup","setting powder",
+"contour kit","bronzer","glow highlighter",
+"false lashes","lash extension","brow kit",
+
+# 🧴 سكن كير قوي
+"korean skincare","glass skin","skin whitening",
+"acne treatment","pimple cream","dark spot remover",
+"blackhead remover","face scrub","exfoliator",
+"vitamin c serum","niacinamide serum",
+"spf 100 sunscreen","organic skincare",
+
+# 💇‍♀️ شعر (احترافي)
+"hair growth oil","anti hair loss","hair vitamins",
+"biotin shampoo","keratin shampoo",
+"hair straightening brush","ionic hair dryer",
+"professional hair tools","barber machine",
+
+# 🌸 عطور فخمة
+"arabic oud","bakhoor","incense burner",
+"luxury fragrance","niche perfume",
+"gift perfume box","mini perfume set",
+"long lasting perfume","strong perfume",
+
+# 📱 جوالات (تفصيل أعمق)
+"cheap smartphone","budget phone","flagship phone",
+"gaming phone","5g phone","dual sim phone",
+"128gb phone","256gb phone","512gb phone",
+
+# 🔌 اكسسوارات متقدمة
+"fast charging cable","type c cable","lightning cable",
+"magnetic cable","wireless powerbank",
+"solar power bank","gaming phone cooler",
+"mobile fan","cooling fan phone",
+"camera lens phone","macro lens phone",
+
+# 🎧 صوتيات احترافية
+"studio headphones","dj headphones",
+"noise cancelling earbuds","bass boosted headphones",
+"gaming earbuds","rgb headset",
+"waterproof speaker","party speaker",
+
+# 💻 إلكترونيات متقدمة
+"ultrabook laptop","business laptop","student laptop",
+"cheap tablet","drawing tablet",
+"smartwatch","fitness tracker",
+"security camera","cctv camera","wifi camera",
+"smart home","smart plug","smart bulb",
+
+# 🎮 جيمينج احترافي
+"gaming pc","rtx graphics card",
+"gaming setup","gaming accessories",
+"rgb mouse","rgb keyboard",
+"gaming monitor 144hz","240hz monitor",
+"gaming desk setup",
+
+# 🍫 طعام (أقوى)
+"keto snacks","diet snacks","low carb snacks",
+"protein snacks","fitness snacks",
+"organic food","healthy food",
+"imported chocolate","luxury chocolate",
+"gift chocolate box","energy snacks",
+
+# 👶 أطفال متقدم
+"montessori toys","learning toys",
+"stem toys","brain toys",
+"kids tablet","kids learning tablet",
+"baby monitor","baby camera",
+"baby care set","newborn essentials",
+
+# 🏠 منزل (احترافي)
+"smart vacuum","robot cleaner",
+"air purifier","humidifier",
+"electric kettle","smart coffee machine",
+"kitchen gadgets","home gadgets",
+"led lights","rgb lights room",
+
+# 🏋️ رياضة متقدمة
+"home gym equipment","fitness home gym",
+"adjustable dumbbells","smart scale",
+"fat burner","muscle gain",
+"gym supplements","mass gainer",
+
+# 🚗 سيارات
+"car accessories","car gadgets",
+"car vacuum","dash cam","car camera",
+"car perfume","seat cover",
+"car charger fast","car organizer",
+
+# 💎 فخم
+"luxury watch","designer bag",
+"premium leather bag","gold jewelry",
+"diamond jewelry","silver jewelry",
+
+# 🔥 كلمات انفجار نتائج
+"best seller","top rated","most popular",
+"trending now","viral product",
+"amazon choice","limited stock",
+"fast selling","hot product",
+"top deals today","big discount",
+"lowest ever price","price drop",
+"must buy","recommended"
 
     ]
 
