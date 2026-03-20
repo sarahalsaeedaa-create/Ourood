@@ -294,7 +294,7 @@ keywords = [
 "fast selling","hot product",
 "top deals today","big discount",
 "lowest ever price","price drop",
-"must buy","recommended"
+"must buy","recommended",
 
     ]
 
