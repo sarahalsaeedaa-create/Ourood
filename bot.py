@@ -54,248 +54,78 @@ def fetch_page(session,url):
 def build_urls():
 
     keywords = [
+"price error","pricing error","glitch deal","wrong price","mistake price",
+"super discount","crazy deal","insane deal","hidden deal","secret deal",
+"warehouse deal","refurbished","renewed","open box","like new",
 
-# 👕 ملابس رجالي
 "men t shirt","plain t shirt","graphic t shirt","oversized t shirt",
 "men hoodie","zip hoodie","sweatshirt","men jacket","winter jacket",
 "leather jacket","denim jacket","men jeans","slim jeans","baggy jeans",
 "cargo pants","joggers","shorts men","swim shorts","underwear men",
 "boxers","briefs","pajamas men","tracksuit","gym wear men",
 
-# 👗 ملابس حريمي
 "women dress","evening dress","party dress","maxi dress","summer dress",
-"abaya","abaya women","hijab","scarf","women blouse","crop top",
-"women t shirt","women jeans","skinny jeans women","leggings",
-"yoga pants","skirts","mini skirt","long skirt","nightwear women",
+"abaya","hijab","scarf","women blouse","crop top","women t shirt",
+"women jeans","leggings","yoga pants","skirts","nightwear women",
 
-# 👶 ملابس أطفال
-"kids clothes","baby clothes","baby set","baby outfit",
-"kids t shirt","kids hoodie","kids jeans","kids dress",
-"school uniform","baby pajamas",
+"kids clothes","baby clothes","baby outfit","kids t shirt",
+"kids hoodie","kids jeans","kids dress","baby pajamas",
 
-# 👟 أحذية
 "nike shoes","adidas shoes","puma shoes","reebok shoes",
 "running shoes","walking shoes","training shoes",
-"basketball shoes","football shoes","boots","ankle boots",
-"heels","high heels","sandals","slippers","flip flops",
-"crocs","kids shoes","baby shoes","school shoes",
+"basketball shoes","boots","heels","sandals","slippers",
+"flip flops","crocs","kids shoes","baby shoes",
 
-# 💄 مكياج
-"makeup kit","lipstick matte","liquid lipstick",
-"foundation full coverage","concealer makeup",
-"face powder","setting spray","makeup brush set",
-"beauty blender","eyeliner","mascara waterproof",
-"eyeshadow palette","highlighter makeup","blush makeup",
+"makeup kit","lipstick","foundation","concealer",
+"face powder","setting spray","makeup brush",
+"eyeliner","mascara","eyeshadow","highlighter","blush",
 
-# 🧴 عناية بالبشرة
-"skincare set","face cream","face serum vitamin c",
-"hyaluronic acid serum","retinol cream",
-"cleanser face","face wash","moisturizer",
-"sunscreen spf 50","night cream","anti aging cream",
-"eye cream","face mask","peeling solution",
+"skincare","face cream","face serum","vitamin c serum",
+"cleanser","face wash","moisturizer","sunscreen",
+"night cream","anti aging","eye cream","face mask",
 
-# 💇‍♀️ عناية بالشعر
 "shampoo","conditioner","hair oil","argan oil",
-"hair mask","keratin treatment","hair serum",
-"hair dryer","hair straightener","hair curler",
-"hair brush","scalp massager",
+"hair mask","hair serum","hair dryer","hair straightener",
 
-# 🌸 عطور
-"perfume","men perfume","women perfume",
-"arabic perfume","oud perfume","luxury perfume",
-"gift perfume set","body spray","deodorant",
+"perfume","men perfume","women perfume","oud perfume",
+"luxury perfume","body spray","deodorant",
 
-# 📱 جوالات
 "iphone","iphone 11","iphone 12","iphone 13","iphone 14","iphone 15",
-"iphone pro max","renewed iphone","used iphone",
-"samsung galaxy","galaxy s21","s22","s23","s24",
-"android phone","xiaomi phone","redmi phone",
-"oppo phone","realme phone","huawei phone",
+"samsung galaxy","android phone","xiaomi phone","oppo phone","realme phone",
 
-# 🔌 اكسسوارات موبايل
-"phone case","iphone case","clear case","shockproof case",
-"charger","fast charger","usb c charger",
-"wireless charger","magnetic charger",
-"power bank","20000mah power bank",
-"car charger","phone holder car",
-"screen protector","tempered glass",
-"camera protector","ring light phone",
-"tripod phone","selfie stick",
+"phone case","iphone case","charger","fast charger",
+"power bank","wireless charger","car charger",
+"screen protector","tempered glass","ring light","tripod",
 
-# 🎧 صوتيات
-"earbuds","bluetooth earbuds","wireless earbuds",
-"airpods","noise cancelling headphones",
-"gaming headset","speaker bluetooth",
-"portable speaker","soundbar",
+"earbuds","bluetooth earbuds","airpods",
+"headphones","speaker","portable speaker",
 
-# 💻 إلكترونيات
-"laptop","gaming laptop","cheap laptop",
-"tablet","ipad","android tablet",
-"smart tv","4k tv","android tv box",
-"monitor","gaming monitor","keyboard",
-"mechanical keyboard","gaming mouse",
-"webcam","printer","router wifi",
+"laptop","gaming laptop","tablet","ipad",
+"smart tv","4k tv","monitor","keyboard","mouse","webcam",
 
-# 🎮 جيمينج
 "gaming mouse","gaming keyboard","gaming chair",
-"ps5","playstation 5","xbox series x",
-"nintendo switch","gaming headset",
-"rgb keyboard","gaming desk",
+"ps5","xbox","nintendo switch",
 
-# 🍫 طعام
-"chocolate","dark chocolate","milk chocolate",
-"snacks","chips","biscuits","cookies",
-"protein bar","granola bar","energy bar",
-"coffee","instant coffee","espresso",
-"tea","green tea","matcha",
-"dates","saudi dates","ajwa dates",
-"nuts","almonds","cashew","pistachio",
-"honey","natural honey","peanut butter",
+"chocolate","snacks","chips","biscuits",
+"protein bar","coffee","tea","dates","nuts","honey",
 
-# 👶 أطفال
-"baby toys","kids toys","educational toys",
-"lego","lego sets","puzzle kids",
-"remote control car","rc car",
-"baby stroller","baby car seat",
-"baby bottle","feeding bottle",
-"baby milk","formula milk",
-keywords = [
+"baby toys","kids toys","lego","puzzle",
+"remote car","baby stroller","baby bottle",
+"diapers","baby wipes",
 
-# 🔥 كلمات جليتش / عروض مخفية
-"price error","pricing error","glitch deal","wrong price",
-"mistake price","super discount","crazy deal","insane deal",
-"unbelievable deal","hidden deal","secret deal",
-"warehouse deal","refurbished","renewed","open box",
-"like new","used like new","clearance sale","liquidation sale",
+"air fryer","blender","coffee machine","vacuum cleaner",
+"robot vacuum","microwave","kitchen tools",
 
-# 👕 ملابس (تفصيل قوي)
-"oversized hoodie","streetwear hoodie","graphic hoodie",
-"zip up hoodie","heavyweight hoodie","fleece hoodie",
-"baggy jeans","ripped jeans","distressed jeans",
-"cargo pants men","cargo pants women",
-"tracksuit set","gym outfit","athleisure wear",
-"compression shirt","thermal wear","winter clothes",
-"summer clothes","beach wear","swimwear","bikini set",
+"fitness equipment","dumbbells","yoga mat",
+"treadmill","exercise bike","protein powder","creatine",
 
-# 👗 نسائي (ترند)
-"bodycon dress","cocktail dress","prom dress",
-"abaya luxury","abaya embroidered",
-"hijab chiffon","hijab cotton","turban scarf",
-"loungewear women","homewear set","sleepwear",
-"lingerie set","sports bra","yoga outfit",
+"car accessories","car charger","dash cam","car vacuum",
 
-# 👟 أحذية متقدمة
-"sneakers","chunky sneakers","running sneakers",
-"retro sneakers","limited sneakers",
-"gym shoes","training sneakers",
-"hiking boots","combat boots",
-"luxury shoes","designer shoes",
+"luxury watch","designer bag","gold jewelry","silver jewelry",
 
-# 💄 مكياج احترافي
-"full makeup kit professional","makeup palette",
-"hd foundation","matte foundation","bb cream",
-"cc cream","primer makeup","setting powder",
-"contour kit","bronzer","glow highlighter",
-"false lashes","lash extension","brow kit",
-
-# 🧴 سكن كير قوي
-"korean skincare","glass skin","skin whitening",
-"acne treatment","pimple cream","dark spot remover",
-"blackhead remover","face scrub","exfoliator",
-"vitamin c serum","niacinamide serum",
-"spf 100 sunscreen","organic skincare",
-
-# 💇‍♀️ شعر (احترافي)
-"hair growth oil","anti hair loss","hair vitamins",
-"biotin shampoo","keratin shampoo",
-"hair straightening brush","ionic hair dryer",
-"professional hair tools","barber machine",
-
-# 🌸 عطور فخمة
-"arabic oud","bakhoor","incense burner",
-"luxury fragrance","niche perfume",
-"gift perfume box","mini perfume set",
-"long lasting perfume","strong perfume",
-
-# 📱 جوالات (تفصيل أعمق)
-"cheap smartphone","budget phone","flagship phone",
-"gaming phone","5g phone","dual sim phone",
-"128gb phone","256gb phone","512gb phone",
-
-# 🔌 اكسسوارات متقدمة
-"fast charging cable","type c cable","lightning cable",
-"magnetic cable","wireless powerbank",
-"solar power bank","gaming phone cooler",
-"mobile fan","cooling fan phone",
-"camera lens phone","macro lens phone",
-
-# 🎧 صوتيات احترافية
-"studio headphones","dj headphones",
-"noise cancelling earbuds","bass boosted headphones",
-"gaming earbuds","rgb headset",
-"waterproof speaker","party speaker",
-
-# 💻 إلكترونيات متقدمة
-"ultrabook laptop","business laptop","student laptop",
-"cheap tablet","drawing tablet",
-"smartwatch","fitness tracker",
-"security camera","cctv camera","wifi camera",
-"smart home","smart plug","smart bulb",
-
-# 🎮 جيمينج احترافي
-"gaming pc","rtx graphics card",
-"gaming setup","gaming accessories",
-"rgb mouse","rgb keyboard",
-"gaming monitor 144hz","240hz monitor",
-"gaming desk setup",
-
-# 🍫 طعام (أقوى)
-"keto snacks","diet snacks","low carb snacks",
-"protein snacks","fitness snacks",
-"organic food","healthy food",
-"imported chocolate","luxury chocolate",
-"gift chocolate box","energy snacks",
-
-# 👶 أطفال متقدم
-"montessori toys","learning toys",
-"stem toys","brain toys",
-"kids tablet","kids learning tablet",
-"baby monitor","baby camera",
-"baby care set","newborn essentials",
-
-# 🏠 منزل (احترافي)
-"smart vacuum","robot cleaner",
-"air purifier","humidifier",
-"electric kettle","smart coffee machine",
-"kitchen gadgets","home gadgets",
-"led lights","rgb lights room",
-
-# 🏋️ رياضة متقدمة
-"home gym equipment","fitness home gym",
-"adjustable dumbbells","smart scale",
-"fat burner","muscle gain",
-"gym supplements","mass gainer",
-
-# 🚗 سيارات
-"car accessories","car gadgets",
-"car vacuum","dash cam","car camera",
-"car perfume","seat cover",
-"car charger fast","car organizer",
-
-# 💎 فخم
-"luxury watch","designer bag",
-"premium leather bag","gold jewelry",
-"diamond jewelry","silver jewelry",
-
-# 🔥 كلمات انفجار نتائج
-"best seller","top rated","most popular",
-"trending now","viral product",
-"amazon choice","limited stock",
-"fast selling","hot product",
-"top deals today","big discount",
-"lowest ever price","price drop",
-"must buy","recommended",
-
+"best seller","top rated","trending now","viral product",
+"amazon choice","limited stock","hot deal",
+"big discount","lowest price","price drop"
     ]
 
 
