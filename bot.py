@@ -54,78 +54,139 @@ def fetch_page(session,url):
 def build_urls():
 
     keywords = [
-"price error","pricing error","glitch deal","wrong price","mistake price",
-"super discount","crazy deal","insane deal","hidden deal","secret deal",
-"warehouse deal","refurbished","renewed","open box","like new",
 
+# 🔥 Glitch + Hidden
+"price error","pricing error","wrong price","glitch deal","mistake price",
+"error deal","bug price","hidden deal","secret deal","crazy deal",
+"insane deal","unbelievable deal","warehouse deal","clearance sale",
+"liquidation sale","last chance","final sale","super clearance",
+
+# 👕 Men Clothing
 "men t shirt","plain t shirt","graphic t shirt","oversized t shirt",
-"men hoodie","zip hoodie","sweatshirt","men jacket","winter jacket",
-"leather jacket","denim jacket","men jeans","slim jeans","baggy jeans",
-"cargo pants","joggers","shorts men","swim shorts","underwear men",
-"boxers","briefs","pajamas men","tracksuit","gym wear men",
+"streetwear t shirt","long sleeve shirt","polo shirt",
+"men hoodie","zip hoodie","pullover hoodie",
+"men jacket","winter jacket","leather jacket","denim jacket",
+"men jeans","slim fit jeans","regular fit jeans","baggy jeans",
+"cargo pants","joggers","track pants","shorts men",
+"swim shorts","underwear men","boxers","briefs",
+"pajamas men","tracksuit","gym wear men","sportswear men",
 
-"women dress","evening dress","party dress","maxi dress","summer dress",
-"abaya","hijab","scarf","women blouse","crop top","women t shirt",
-"women jeans","leggings","yoga pants","skirts","nightwear women",
+# 👗 Women Clothing
+"women dress","summer dress","maxi dress","mini dress","evening dress",
+"party dress","cocktail dress","abaya","abaya women",
+"hijab","scarf","turban","women blouse",
+"crop top","tank top","women t shirt",
+"women jeans","leggings","yoga pants",
+"skirts","long skirt","mini skirt",
+"sleepwear women","nightwear women",
 
-"kids clothes","baby clothes","baby outfit","kids t shirt",
-"kids hoodie","kids jeans","kids dress","baby pajamas",
+# 👶 Kids Clothing
+"kids clothes","baby clothes","baby outfit","baby set",
+"kids t shirt","kids hoodie","kids jeans","kids dress",
+"baby pajamas","school uniform",
 
+# 👟 Shoes
 "nike shoes","adidas shoes","puma shoes","reebok shoes",
 "running shoes","walking shoes","training shoes",
-"basketball shoes","boots","heels","sandals","slippers",
+"basketball shoes","football shoes",
+"boots","ankle boots","combat boots",
+"heels","high heels","sandals","slippers",
 "flip flops","crocs","kids shoes","baby shoes",
 
-"makeup kit","lipstick","foundation","concealer",
-"face powder","setting spray","makeup brush",
-"eyeliner","mascara","eyeshadow","highlighter","blush",
+# 💄 Makeup
+"makeup kit","lipstick matte","liquid lipstick",
+"foundation full coverage","bb cream","cc cream",
+"concealer makeup","face powder","setting spray",
+"makeup brush set","beauty blender",
+"eyeliner","mascara waterproof",
+"eyeshadow palette","highlighter makeup","blush makeup",
 
-"skincare","face cream","face serum","vitamin c serum",
-"cleanser","face wash","moisturizer","sunscreen",
-"night cream","anti aging","eye cream","face mask",
+# 🧴 Skincare
+"skincare set","face cream","face serum","vitamin c serum",
+"hyaluronic acid serum","retinol cream",
+"cleanser face","face wash","moisturizer",
+"sunscreen spf 50","night cream","anti aging cream",
+"eye cream","face mask","peeling solution",
 
+# 💇 Hair
 "shampoo","conditioner","hair oil","argan oil",
-"hair mask","hair serum","hair dryer","hair straightener",
+"hair mask","keratin treatment","hair serum",
+"hair dryer","hair straightener","hair curler",
 
-"perfume","men perfume","women perfume","oud perfume",
-"luxury perfume","body spray","deodorant",
+# 🌸 Perfume
+"perfume","men perfume","women perfume",
+"arabic perfume","oud perfume","luxury perfume",
+"body spray","deodorant","perfume gift set",
 
+# 📱 Phones
 "iphone","iphone 11","iphone 12","iphone 13","iphone 14","iphone 15",
-"samsung galaxy","android phone","xiaomi phone","oppo phone","realme phone",
+"samsung galaxy","android phone","xiaomi phone",
+"oppo phone","realme phone","huawei phone",
 
-"phone case","iphone case","charger","fast charger",
-"power bank","wireless charger","car charger",
-"screen protector","tempered glass","ring light","tripod",
+# 🔌 Accessories
+"phone case","iphone case","clear case","shockproof case",
+"charger","fast charger","usb c charger",
+"wireless charger","power bank",
+"car charger","phone holder car",
+"screen protector","tempered glass",
 
-"earbuds","bluetooth earbuds","airpods",
-"headphones","speaker","portable speaker",
+# 🎧 Audio
+"earbuds","bluetooth earbuds","wireless earbuds",
+"airpods","noise cancelling headphones",
+"gaming headset","speaker bluetooth",
 
-"laptop","gaming laptop","tablet","ipad",
-"smart tv","4k tv","monitor","keyboard","mouse","webcam",
+# 💻 Electronics
+"laptop","gaming laptop","cheap laptop",
+"tablet","ipad","android tablet",
+"smart tv","4k tv","android tv",
+"monitor","gaming monitor",
+"keyboard","gaming keyboard",
+"mouse","gaming mouse",
 
-"gaming mouse","gaming keyboard","gaming chair",
-"ps5","xbox","nintendo switch",
+# 🎮 Gaming
+"ps5","playstation 5","xbox series x",
+"nintendo switch","gaming chair",
+"gaming desk","rgb keyboard",
 
+# 🍫 Food
 "chocolate","snacks","chips","biscuits",
-"protein bar","coffee","tea","dates","nuts","honey",
+"protein bar","coffee","tea",
+"dates","saudi dates","nuts",
+"honey","peanut butter",
 
+# 👶 Kids
 "baby toys","kids toys","lego","puzzle",
-"remote car","baby stroller","baby bottle",
+"remote control car",
+"baby stroller","baby bottle",
 "diapers","baby wipes",
 
-"air fryer","blender","coffee machine","vacuum cleaner",
-"robot vacuum","microwave","kitchen tools",
+# 🏠 Home
+"air fryer","blender","coffee machine",
+"vacuum cleaner","robot vacuum",
+"microwave","kitchen tools",
 
+# 🏋️ Fitness
 "fitness equipment","dumbbells","yoga mat",
-"treadmill","exercise bike","protein powder","creatine",
+"treadmill","exercise bike",
+"protein powder","creatine",
 
-"car accessories","car charger","dash cam","car vacuum",
+# 🚗 Cars
+"car accessories","car charger","dash cam",
+"car vacuum","car organizer",
 
-"luxury watch","designer bag","gold jewelry","silver jewelry",
+# 💎 Luxury
+"luxury watch","designer bag",
+"gold jewelry","silver jewelry",
 
-"best seller","top rated","trending now","viral product",
-"amazon choice","limited stock","hot deal",
-"big discount","lowest price","price drop"
+# 🔥 Viral + Trends
+"best seller","top rated","most popular",
+"trending now","viral product",
+"amazon choice","limited stock",
+"fast selling","hot product",
+"top deals today","big discount",
+"lowest price","price drop",
+"must buy","recommended"
+
     ]
 
 
