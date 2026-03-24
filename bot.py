@@ -259,7 +259,7 @@ def main():
 
     threading.Thread(target=run_server, daemon=True).start()
 
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    updater = Updater(8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok, use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start_cmd))
