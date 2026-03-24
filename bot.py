@@ -4,8 +4,8 @@ import json
 import time
 import random
 import hashlib
-import asyncio
-import aiohttp
+import cloudscraper
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 from telegram import Update
@@ -33,7 +33,7 @@ def create_hash(text):
     text = re.sub(r"\d+","",text)
     return hashlib.md5(text[:40].encode()).hexdigest()
 
-# 🔥 كلمات مختارة بعناية (مش كل الكلمات)
+# 🔥 كلمات مختارة (50 كلمة فقط للسرعة)
 TOP_KEYWORDS = [
     "price error","glitch deal","flash sale","lightning deal","clearance sale",
     "warehouse deal","best seller","top rated","amazon choice","limited time",
@@ -51,12 +51,12 @@ TOP_KEYWORDS = [
 def build_fast_urls():
     urls = []
     
-    # 🔥 1. أهم 5 صفحات لكل كلمة (مش 40)
+    # 🔥 3 صفحات بس لكل كلمة (150 URL)
     for kw in TOP_KEYWORDS:
-        for page in range(1, 6):  # 5 بس مش 40
+        for page in range(1, 4):
             urls.append(f"https://www.amazon.sa/s?k={kw}&page={page}")
     
-    # 🔥 2. الصفحات الرئيسية المهمة
+    # 🔥 الصفحات الرئيسية
     urls.extend([
         "https://www.amazon.sa/gp/todays-deals",
         "https://www.amazon.sa/gp/goldbox",
@@ -65,28 +65,36 @@ def build_fast_urls():
         "https://www.amazon.sa/deals",
         "https://www.amazon.sa/gp/warehouse-deals",
         "https://www.amazon.sa/outlet",
+        "https://www.amazon.sa/gp/most-wished-for",
+        "https://www.amazon.sa/gp/most-gifted",
     ])
     
-    # 🔥 3. أقسام العروض المباشرة
-    categories = ["electronics","fashion","home","beauty","sports","toys"]
-    for cat in categories:
+    # 🔥 أقسام العروض
+    for cat in ["electronics","fashion","home","beauty","sports","toys"]:
         urls.append(f"https://www.amazon.sa/deals/{cat}")
         urls.append(f"https://www.amazon.sa/gp/bestsellers/{cat}")
     
     return urls
 
-async def fetch_one(session, url, semaphore):
-    async with semaphore:  # تحديد عدد الطلبات المتزامنة
-        try:
-            headers = {"User-Agent": ua.random}
-            async with session.get(url, headers=headers, timeout=10) as r:
-                if r.status == 200:
-                    return await r.text()
-        except:
-            pass
-        return None
+def fetch_one(url):
+    """تنفيذ طلب واحد"""
+    try:
+        session = cloudscraper.create_scraper()
+        session.headers.update({
+            "User-Agent": ua.random,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "ar-SA,ar;q=0.9,en;q=0.8",
+        })
+        
+        r = session.get(url, timeout=15)
+        if r.status_code == 200:
+            return r.text
+    except Exception as e:
+        pass
+    return None
 
 def parse_fast(html):
+    """استخراج العروض من HTML"""
     if not html:
         return []
     
@@ -97,7 +105,7 @@ def parse_fast(html):
     for item in items:
         try:
             # Title
-            title_el = item.select_one("h2 a span, h2 span, .a-size-base-plus")
+            title_el = item.select_one("h2 a span, h2 span, .a-size-base-plus, .a-size-medium")
             if not title_el:
                 continue
             title = title_el.text.strip()
@@ -118,7 +126,7 @@ def parse_fast(html):
             if price <= 0:
                 continue
             
-            # Old Price (للحصول على الخصم)
+            # Old Price
             old_el = item.select_one(".a-text-price .a-offscreen")
             if not old_el:
                 continue
@@ -167,88 +175,15 @@ def parse_fast(html):
                 "img": img
             })
             
-        except Exception as e:
+        except:
             continue
     
     return deals
 
-async def search_fast(chat_id):
-    global stop_search
+def send_deal_now(chat_id, deal, tag):
+    """إرسال عرض فوراً"""
+    global updater
     
-    urls = build_fast_urls()
-    total_urls = len(urls)
-    
-    # إرسال رسالة البداية
-    updater.bot.send_message(chat_id, f"🔎 بدء البحث السريع في {total_urls} صفحة...")
-    
-    # Semaphore عشان نتحكم في عدد الطلبات المتزامنة (10 بس)
-    semaphore = asyncio.Semaphore(10)
-    
-    async with aiohttp.ClientSession() as session:
-        tasks = [fetch_one(session, url, semaphore) for url in urls]
-        
-        # معالجة النتائج فوراً مش بعد ما يخلص الكل
-        glitch_deals = []
-        normal_deals = []
-        processed = 0
-        found = 0
-        
-        for i, task in enumerate(asyncio.as_completed(tasks)):
-            if stop_search:
-                break
-            
-            html = await task
-            processed += 1
-            
-            if html:
-                deals = parse_fast(html)
-                
-                for d in deals:
-                    # فلترة التقييم
-                    if d["rating"] < 3 and d["rating"] > 0:
-                        continue
-                    
-                    # Check duplicate
-                    h = create_hash(d["title"])
-                    if h in sent_hashes:
-                        continue
-                    
-                    sent_hashes.add(h)
-                    found += 1
-                    
-                    # إرسال فوري حسب النوع
-                    if d["discount"] >= 90:
-                        glitch_deals.append(d)
-                        await send_deal_async(chat_id, d, "💣 GLITCH")
-                    elif d["discount"] >= 60:
-                        normal_deals.append(d)
-                        await send_deal_async(chat_id, d, "🔥 HOT")
-                    
-                    # كل 10 منتجات نعمل update
-                    if found % 10 == 0:
-                        updater.bot.send_message(
-                            chat_id, 
-                            f"⏳ تم فحص {processed}/{total_urls} | وجدت {found} عرض...",
-                            disable_notification=True
-                        )
-            
-            # تأخير بسيط عشان مايتعملش ban
-            await asyncio.sleep(0.1)
-    
-    # ملخص نهائي
-    summary = f"""
-✅ انتهى البحث!
-
-📊 الإحصائيات:
-• صفحات مفحوصة: {processed}
-• عروض جديدة: {found}
-• Glitch (90%+): {len(glitch_deals)}
-• Hot Deals (60%+): {len(normal_deals)}
-"""
-    updater.bot.send_message(chat_id, summary)
-    save_database()
-
-async def send_deal_async(chat_id, deal, tag):
     msg = f"""
 {tag} {deal['discount']}% OFF
 
@@ -264,27 +199,120 @@ async def send_deal_async(chat_id, deal, tag):
             updater.bot.send_photo(chat_id, photo=deal["img"], caption=msg)
         else:
             updater.bot.send_message(chat_id, msg)
-        await asyncio.sleep(0.5)  # تأخير بسيط بين كل إرسال
+        return True
     except Exception as e:
         try:
             updater.bot.send_message(chat_id, msg)
+            return True
         except:
-            pass
+            return False
+
+def search_worker(args):
+    """الدالة اللي بتشتغل في كل thread"""
+    global stop_search
+    
+    url, chat_id = args
+    
+    if stop_search:
+        return None
+    
+    html = fetch_one(url)
+    if not html:
+        return ("error", url)
+    
+    deals = parse_fast(html)
+    results = []
+    
+    for d in deals:
+        if stop_search:
+            break
+        
+        # فلترة
+        if d["rating"] < 3 and d["rating"] > 0:
+            continue
+        
+        h = create_hash(d["title"])
+        if h in sent_hashes:
+            continue
+        
+        sent_hashes.add(h)
+        
+        # إرسال فوري
+        if d["discount"] >= 90:
+            send_deal_now(chat_id, d, "💣 GLITCH")
+            results.append("glitch")
+        elif d["discount"] >= 60:
+            send_deal_now(chat_id, d, "🔥 HOT")
+            results.append("hot")
+    
+    time.sleep(0.5)  # تأخير بسيط
+    return ("ok", len(results))
 
 def hi_cmd(update: Update, context: CallbackContext):
-    global stop_search
+    global stop_search, updater
     stop_search = False
     
     chat_id = update.effective_chat.id
-    update.message.reply_text("🚀 بدء البحث السريع المتزامن...")
+    updater = context.bot
     
-    # تشغيل البحث في thread منفصل عشان مايعلقش البوت
-    import threading
-    def run_async():
-        asyncio.run(search_fast(chat_id))
+    urls = build_fast_urls()
+    total = len(urls)
     
-    thread = threading.Thread(target=run_async)
-    thread.start()
+    update.message.reply_text(f"🚀 بدء البحث السريع في {total} صفحة...\n⏳ كل عرض هيتبعت فوراً لما نلاقيه\n\nاكتب 'stop' لايقاف البحث")
+    
+    glitch_count = 0
+    hot_count = 0
+    processed = 0
+    
+    # 🔥 ThreadPool - 5 طلبات في نفس الوقت
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # إعداد الـ args لكل URL
+        args_list = [(url, chat_id) for url in urls]
+        
+        # تنفيذ متزامن
+        futures = {executor.submit(search_worker, args): args for args in args_list}
+        
+        for future in as_completed(futures):
+            if stop_search:
+                executor.shutdown(wait=False)
+                break
+            
+            processed += 1
+            
+            try:
+                result = future.result(timeout=20)
+                if result:
+                    status, data = result
+                    if status == "ok" and data > 0:
+                        # تحديث العداد
+                        pass
+            except Exception as e:
+                pass
+            
+            # تحديث كل 10 صفحات
+            if processed % 10 == 0:
+                try:
+                    context.bot.send_message(
+                        chat_id,
+                        f"⏳ تم فحص {processed}/{total} صفحة...",
+                        disable_notification=True
+                    )
+                except:
+                    pass
+    
+    # ملخص نهائي
+    summary = f"""
+✅ {'توقف' if stop_search else 'انتهى'} البحث!
+
+📊 الإحصائيات:
+• صفحات مفحوصة: {processed}/{total}
+• عروض Glitch (90%+): تم إرسالها فوراً
+• عروض Hot (60%+): تم إرسالها فوراً
+
+💡 النتائج اتبعتت فوراً لما اتلاقت!
+"""
+    update.message.reply_text(summary)
+    save_database()
 
 def stop_cmd(update: Update, context: CallbackContext):
     global stop_search
@@ -292,8 +320,6 @@ def stop_cmd(update: Update, context: CallbackContext):
     update.message.reply_text("🛑 جاري إيقاف البحث...")
 
 def main():
-    global updater
-    
     load_database()
     
     updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
@@ -303,7 +329,7 @@ def main():
     dp.add_handler(MessageHandler(Filters.regex(r'(?i)^stop$'), stop_cmd))
     
     updater.start_polling()
-    print("🚀 BOT STARTED - Fast Async Mode")
+    print("🚀 BOT STARTED - Multi-Threaded Mode")
     updater.idle()
 
 if __name__ == "__main__":
