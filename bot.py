@@ -3,17 +3,12 @@ import re
 import json
 import logging
 import cloudscraper
-from datetime import datetime
-from bs4 import BeautifulSoup
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
-from fake_useragent import UserAgent
 import time
 import random
 import hashlib
-import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from concurrent.futures import ThreadPoolExecutor
+from bs4 import BeautifulSoup
+from telegram import Bot
+from fake_useragent import UserAgent
 
 logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -21,170 +16,185 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 🔥 حطي التوكن هنا
+# ====== CONFIG ======
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
-
-PORT = int(os.environ.get("PORT", 8080))
-
+TELEGRAM_CHAT_ID = "432826122"
 ua = UserAgent()
 sent_products = set()
 sent_hashes = set()
-is_scanning = False
-updater = None
 
-# ================= DB =================
+bot = Bot(token=TELEGRAM_BOT_TOKEN)
 
+# ====== DATABASE ======
 def load_database():
     global sent_products, sent_hashes
     if os.path.exists('bot_database.json'):
-        with open('bot_database.json', 'r') as f:
-            data = json.load(f)
-            sent_products = set(data.get('ids', []))
-            sent_hashes = set(data.get('hashes', []))
+        try:
+            with open('bot_database.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                sent_products = set(data.get('ids', []))
+                sent_hashes = set(data.get('hashes', []))
+                logger.info(f"📦 Loaded DB: {len(sent_products)} products")
+        except Exception as e:
+            logger.error(f"Error loading DB: {e}")
 
 def save_database():
-    with open('bot_database.json', 'w') as f:
-        json.dump({
-            'ids': list(sent_products),
-            'hashes': list(sent_hashes)
-        }, f)
+    try:
+        with open('bot_database.json', 'w', encoding='utf-8') as f:
+            json.dump({'ids': list(sent_products), 'hashes': list(sent_hashes)}, f)
+    except Exception as e:
+        logger.error(f"Error saving DB: {e}")
 
-# ================= Helpers =================
+# ====== HELPERS ======
+def extract_asin(link):
+    patterns = [r'/dp/([A-Z0-9]{10})', r'/gp/product/([A-Z0-9]{10})', r'product/([A-Z0-9]{10})']
+    for p in patterns:
+        match = re.search(p, link)
+        if match:
+            return match.group(1).upper()
+    return None
 
+def create_title_hash(title):
+    clean = re.sub(r'[^\w\s]', '', title.lower())
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    clean = re.sub(r'\d+', '', clean)
+    for word in ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'shipped', 'شحن']:
+        clean = clean.replace(word, '')
+    return hashlib.md5(clean[:30].encode()).hexdigest()[:16]
+
+def is_similar_product(title):
+    new_hash = create_title_hash(title)
+    if new_hash in sent_hashes:
+        return True
+    return False
+
+def get_product_id(deal):
+    asin = extract_asin(deal.get('link', ''))
+    if asin:
+        return f"ASIN_{asin}"
+    key = f"{deal.get('title', '')}_{deal.get('price', 0)}"
+    return f"HASH_{hashlib.md5(key.encode()).hexdigest()[:12]}"
+
+# ====== SESSION ======
 def create_session():
-    session = cloudscraper.create_scraper()
+    session = cloudscraper.create_scraper(
+        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True},
+        delay=10
+    )
     session.headers.update({
-        'User-Agent': ua.random
+        'User-Agent': ua.random,
+        'Accept-Language': 'ar-SA,ar;q=0.9',
+        'Referer': 'https://www.amazon.sa/',
     })
     return session
 
 def fetch_page(session, url):
-    try:
-        time.sleep(random.uniform(0.3, 0.8))
-        r = session.get(url, timeout=20)
-        if r.status_code == 200:
-            return r.text
-    except:
-        pass
+    for i in range(3):
+        try:
+            time.sleep(random.uniform(1, 2))
+            r = session.get(url, timeout=25)
+            if r.status_code == 200:
+                return r.text
+            time.sleep(2)
+        except Exception as e:
+            logger.warning(f"Attempt {i+1} failed: {e}")
     return None
 
-def generate_pages(base_url, pages=5):
-    urls = []
-    for i in range(1, pages + 1):
-        sep = "&" if "?" in base_url else "?"
-        urls.append(f"{base_url}{sep}page={i}")
-    return urls
-
-def parse_item(item, category):
+# ====== PARSE ITEMS ======
+def parse_item(item, category, is_best_seller):
     try:
-        title = item.select_one("h2 span").text.strip()
-        price_el = item.select_one(".a-offscreen")
-        price = float(re.sub(r"[^\d.]", "", price_el.text))
-
-        link = "https://www.amazon.sa" + item.select_one("a")["href"]
-
-        return {
-            "title": title,
-            "price": price,
-            "category": category,
-            "link": link,
-            "id": hashlib.md5(title.encode()).hexdigest()
-        }
-    except:
+        # Title
+        title = "Unknown"
+        for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated', '.a-size-medium']:
+            el = item.select_one(sel)
+            if el:
+                title = el.text.strip()
+                if len(title) > 5:
+                    break
+        
+        # Price
+        price = None
+        for sel in ['.a-price-whole', '.a-price .a-offscreen', '.a-price-range', '.a-price']:
+            el = item.select_one(sel)
+            if el:
+                txt = el.text.replace(',', '').replace('ريال', '').strip()
+                match = re.search(r'[\d,]+\.?\d*', txt)
+                if match:
+                    price = float(match.group().replace(',', ''))
+                    break
+        if not price or price <= 0:
+            return None
+        
+        # Link
+        link = ""
+        a = item.find('a', href=True)
+        if a:
+            href = a['href']
+            if href.startswith('/'):
+                link = f"https://www.amazon.sa{href}"
+            else:
+                link = href
+        
+        # Discount calculation
+        old_price = 0
+        discount = 0
+        old_el = item.find('span', class_='a-text-price')
+        if old_el:
+            txt = old_el.get_text()
+            match = re.search(r'[\d,]+\.?\d*', txt.replace(',', ''))
+            if match:
+                old_price = float(match.group())
+                if old_price > price:
+                    discount = int(((old_price - price)/old_price)*100)
+        
+        # Build deal dict
+        deal = {'title': title, 'price': price, 'old_price': old_price, 'discount': discount, 'link': link, 'category': category}
+        return deal
+    except Exception as e:
+        logger.error(f"parse_item error: {e}")
         return None
 
-# ================= Thread Worker =================
+# ====== SEND TO TELEGRAM ======
+def send_to_telegram(deal):
+    try:
+        msg = f"📌 {deal['title']}\n💰 Price: {deal['price']} SAR"
+        if deal['discount'] > 0:
+            msg += f"\n💸 Discount: {deal['discount']}%\n~ {deal['old_price']} SAR"
+        if deal.get('link'):
+            msg += f"\n🔗 {deal['link']}"
+        bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=msg)
+        logger.info(f"✅ Sent: {deal['title']}")
+    except Exception as e:
+        logger.error(f"Telegram send error: {e}")
 
-def process_category(args):
-    url, name = args
-    deals = []
-
+# ====== SEARCH & PROCESS ======
+def search_and_send():
     session = create_session()
-    html = fetch_page(session, url)
-    if not html:
-        return []
-
-    soup = BeautifulSoup(html, "html.parser")
-    items = soup.find_all("div", {"data-component-type": "s-search-result"})
-
-    for item in items:
-        deal = parse_item(item, name)
-        if deal:
-            deals.append(deal)
-
-    return deals
-
-# ================= Search =================
-
-def search_all_deals(chat_id, msg_id):
-    categories = [
-        ("https://www.amazon.sa/s?k=iphone", "📱 iPhone"),
-        ("https://www.amazon.sa/s?k=laptop", "💻 Laptop"),
-        ("https://www.amazon.sa/s?k=headphones", "🎧 Headphones"),
+    urls = [
+        # مثال صغير للتجربة، يمكن توسعته مع بقية الأقسام
+        ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", True),
+        ("https://www.amazon.sa/deals/electronics", "📱 Electronics Deals", False)
     ]
+    for url, cat_name, is_best_seller in urls:
+        html = fetch_page(session, url)
+        if not html:
+            continue
+        soup = BeautifulSoup(html, 'html.parser')
+        items = soup.find_all('div', {'data-component-type': 's-search-result'})
+        for item in items:
+            deal = parse_item(item, cat_name, is_best_seller)
+            if deal:
+                prod_id = get_product_id(deal)
+                title_hash = create_title_hash(deal['title'])
+                # إرسال كل المنتجات حتى لو مكررة
+                send_to_telegram(deal)
+                sent_products.add(prod_id)
+                sent_hashes.add(title_hash)
+        time.sleep(random.uniform(1,2))
+    save_database()
+    logger.info("✅ Finished sending all deals")
 
-    expanded = []
-    for url, name in categories:
-        expanded.extend([(p, name) for p in generate_pages(url, 5)])
-
-    results = []
-
-    def worker(args):
-        return process_category(args)
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        for res in executor.map(worker, expanded):
-            results.extend(res)
-
-    return results
-
-# ================= Telegram =================
-
-def start_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text("👋 اكتب Hi لبدء البحث")
-
-def hi_cmd(update: Update, context: CallbackContext):
-    global is_scanning
-
-    if is_scanning:
-        update.message.reply_text("⏳ شغال...")
-        return
-
-    is_scanning = True
-    msg = update.message.reply_text("🔍 جاري البحث...")
-
-    deals = search_all_deals(update.effective_chat.id, msg.message_id)
-
-    update.message.reply_text(f"✅ تم العثور على {len(deals)} منتج")
-
-    is_scanning = False
-
-# ================= Health =================
-
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-def run_server():
-    HTTPServer(("0.0.0.0", PORT), HealthHandler).serve_forever()
-
-# ================= Main =================
-
-def main():
-    global updater
-
-    threading.Thread(target=run_server, daemon=True).start()
-
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-
-    dp.add_handler(CommandHandler("start", start_cmd))
-    dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$'), hi_cmd))
-
-    updater.start_polling()
-    updater.idle()
-
+# ====== MAIN ======
 if __name__ == "__main__":
-    main()
+    load_database()
+    search_and_send()
