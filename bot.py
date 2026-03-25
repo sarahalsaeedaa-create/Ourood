@@ -967,5 +967,3 @@ if discount == 0:
   
 title = "Unknown"  
 for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated', '.a-size-medium  
-
-ù
