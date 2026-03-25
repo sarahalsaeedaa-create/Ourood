@@ -21,7 +21,7 @@ from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
 ================= CONFIG =================
 
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_TOKEN = os.getenv("8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok")
 PORT = int(os.environ.get("PORT", 8080))
 
 
