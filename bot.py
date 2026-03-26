@@ -33,32 +33,21 @@ sent_hashes = set()
 is_scanning = False
 updater = None
 
-# ========== إعدادات الترقيم الصفحي والتدوير ==========
-# عدد الصفحات لكل نوع من الأقسام
-PAGES_CONFIG = {
-    'best_sellers': 3,      # Best Sellers - صفحات قليلة لأنها تتغير بسرعة
-    'deals': 2,             # Deals العادية
-    'warehouse': 2,         # Warehouse deals
-    'coupons': 2,           # Coupons
-    'search': 2,            # نتائج البحث
-    'outlet': 2,            # Outlet
-    'prime': 2,             # Prime exclusives
-    'lightning': 1,         # Lightning deals (سريعة)
-    'today': 2,             # Today's deals
-    'clearance': 3,         # Clearance - نبحث أكثر
-}
+# ========== إعدادات البحث ==========
+TARGET_DEALS_COUNT = 40      # عدد النتائج المطلوبة في كل مرة
+MIN_DISCOUNT = 50            # الحد الأدنى للخصم (50%)
+MIN_RATING = 3.5             # الحد الأدنى للتقييم (3.5 نجمة)
 
 # ========== نظام تدوير الصفحات ==========
 class PageRotationManager:
     def __init__(self):
-        self.visited_pages = set()      # الصفحات التي تمت زيارتها
-        self.page_queue = deque()         # قائمة الانتظار للصفحات
-        self.all_pages = []               # جميع الصفحات المتاحة
-        self.rotation_count = 0           # عدد دورات التدوير
-        self.current_batch = []           # الدفعة الحالية
+        self.visited_pages = set()
+        self.page_queue = deque()
+        self.all_pages = []
+        self.rotation_count = 0
+        self.current_batch = []
         
     def load_state(self):
-        """تحميل حالة التدوير من الملف"""
         try:
             if os.path.exists('page_rotation.json'):
                 with open('page_rotation.json', 'r', encoding='utf-8') as f:
@@ -70,7 +59,6 @@ class PageRotationManager:
             logger.error(f"Error loading rotation state: {e}")
     
     def save_state(self):
-        """حفظ حالة التدوير"""
         try:
             with open('page_rotation.json', 'w', encoding='utf-8') as f:
                 json.dump({
@@ -82,7 +70,6 @@ class PageRotationManager:
             logger.error(f"Error saving rotation state: {e}")
     
     def generate_all_pages(self, categories):
-        """توليد جميع روابط الصفحات من قائمة الفئات"""
         self.all_pages = []
         
         for base_url, cat_name, cat_type in categories:
@@ -105,11 +92,9 @@ class PageRotationManager:
         return self.all_pages
     
     def _build_page_url(self, base_url, page_num):
-        """بناء رابط الصفحة حسب نوعها"""
         if page_num == 1:
             return base_url
             
-        # تحديد طريقة الترقيم حسب نوع URL
         if 'gp/bestsellers' in base_url or 'gp/goldbox' in base_url:
             separator = '&' if '?' in base_url else '?'
             return f"{base_url}{separator}pg={page_num}"
@@ -121,28 +106,22 @@ class PageRotationManager:
             return f"{base_url}{separator}page={page_num}"
     
     def get_next_batch(self, batch_size=50):
-        """الحصول على الدفعة التالية من الصفحات للبحث"""
-        # إذا كانت قائمة الانتظار فارغة، نعيد توليدها
         if not self.page_queue:
             self._refill_queue()
         
-        # استخراج الدفعة التالية
         batch = []
         available_pages = [p for p in self.page_queue if p['id'] not in self.visited_pages]
         
-        # إذا تم زيارة جميع الصفحات، نعيد تعيين القائمة
-        if len(self.visited_pages) >= len(self.all_pages) * 0.9:  # 90% من الصفحات تمت زيارتها
+        if len(self.visited_pages) >= len(self.all_pages) * 0.9:
             logger.info("🔄 All pages visited, resetting rotation...")
             self.visited_pages.clear()
             self.rotation_count += 1
             self._refill_queue()
             available_pages = list(self.page_queue)
         
-        # اختيار الصفحات عشوائياً من غير المزارة
         random.shuffle(available_pages)
         batch = available_pages[:batch_size]
         
-        # إزالة الصفحات المختارة من قائمة الانتظار
         for page in batch:
             if page in self.page_queue:
                 self.page_queue.remove(page)
@@ -155,22 +134,18 @@ class PageRotationManager:
         return batch
     
     def _refill_queue(self):
-        """إعادة ملء قائمة الانتظار بالصفحات غير المزارة"""
         unvisited = [p for p in self.all_pages if p['id'] not in self.visited_pages]
         
         if not unvisited:
-            # إذا تم زيارة جميع الصفحات، نبدأ من جديد
             unvisited = self.all_pages.copy()
             self.visited_pages.clear()
             self.rotation_count += 1
         
-        # خلط عشوائي للصفحات
         random.shuffle(unvisited)
         self.page_queue = deque(unvisited)
         logger.info(f"🔄 Refilled queue with {len(unvisited)} pages")
     
     def get_stats(self):
-        """إحصائيات التدوير"""
         return {
             'total_pages': len(self.all_pages),
             'visited_pages': len(self.visited_pages),
@@ -179,7 +154,6 @@ class PageRotationManager:
             'progress_percent': (len(self.visited_pages) / len(self.all_pages) * 100) if self.all_pages else 0
         }
 
-# إنشاء مدير التدوير العالمي
 page_rotator = PageRotationManager()
 
 def load_database():
@@ -270,9 +244,20 @@ def fetch_page(session, url):
             logger.warning(f"Attempt {i+1} failed: {e}")
     return None
 
-# ========== قائمة الفئات (بدون روابط مباشرة) ==========
+PAGES_CONFIG = {
+    'best_sellers': 3,
+    'deals': 2,
+    'warehouse': 2,
+    'coupons': 2,
+    'search': 2,
+    'outlet': 2,
+    'prime': 2,
+    'lightning': 1,
+    'today': 2,
+    'clearance': 3,
+}
+
 CATEGORIES_DEF = [
-    # 🏆 Best Sellers الأساسية
     ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", 'best_sellers'),
@@ -299,7 +284,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/gp/bestsellers/video-games", "🎮 Games Best Seller", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/camera", "📷 Camera Best Seller", 'best_sellers'),
     
-    # 💰 Goldbox & Deals الرسمية
     ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox", 'deals'),
     ("https://www.amazon.sa/deals/electronics", "📱 Electronics Deals", 'deals'),
     ("https://www.amazon.sa/deals/fashion", "👕 Fashion Deals", 'deals'),
@@ -317,7 +301,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/deals/office", "📎 Office Deals", 'deals'),
     ("https://www.amazon.sa/deals/books", "📚 Books Deals", 'deals'),
     
-    # 🔥 عروض مخفية - Warehouse Deals
     ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse Deals", 'warehouse'),
     ("https://www.amazon.sa/gp/warehouse-deals/electronics", "🏭 Warehouse Electronics", 'warehouse'),
     ("https://www.amazon.sa/gp/warehouse-deals/fashion", "🏭 Warehouse Fashion", 'warehouse'),
@@ -327,7 +310,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/gp/warehouse-deals/sports", "🏭 Warehouse Sports", 'warehouse'),
     ("https://www.amazon.sa/gp/warehouse-deals/tools", "🏭 Warehouse Tools", 'warehouse'),
     
-    # 🎟️ عروض مخفية - Coupons
     ("https://www.amazon.sa/gp/coupons", "🎟️ Coupons", 'coupons'),
     ("https://www.amazon.sa/gp/coupons/electronics", "🎟️ Electronics Coupons", 'coupons'),
     ("https://www.amazon.sa/gp/coupons/fashion", "🎟️ Fashion Coupons", 'coupons'),
@@ -336,25 +318,21 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/gp/coupons/grocery", "🎟️ Grocery Coupons", 'coupons'),
     ("https://www.amazon.sa/gp/coupons/baby", "🎟️ Baby Coupons", 'coupons'),
     
-    # 👑 Prime & Lightning
     ("https://www.amazon.sa/gp/prime/pipeline/prime_exclusives", "👑 Prime Exclusives", 'prime'),
     ("https://www.amazon.sa/gp/prime/pipeline/lightning_deals", "⚡ Lightning Deals", 'lightning'),
     
-    # 📅 Today's Deals
     ("https://www.amazon.sa/gp/todays-deals", "📅 Today Deals", 'today'),
     ("https://www.amazon.sa/gp/todays-deals/electronics", "📅 Today Electronics", 'today'),
     ("https://www.amazon.sa/gp/todays-deals/fashion", "📅 Today Fashion", 'today'),
     ("https://www.amazon.sa/gp/todays-deals/home", "📅 Today Home", 'today'),
     ("https://www.amazon.sa/gp/todays-deals/beauty", "📅 Today Beauty", 'today'),
     
-    # 🎁 Outlet
     ("https://www.amazon.sa/outlet", "🎁 Outlet", 'outlet'),
     ("https://www.amazon.sa/outlet/electronics", "🎁 Outlet Electronics", 'outlet'),
     ("https://www.amazon.sa/outlet/home", "🎁 Outlet Home", 'outlet'),
     ("https://www.amazon.sa/outlet/fashion", "🎁 Outlet Fashion", 'outlet'),
     ("https://www.amazon.sa/outlet/beauty", "🎁 Outlet Beauty", 'outlet'),
     
-    # 🔥 عروض سرية - Clearance
     ("https://www.amazon.sa/s?k=clearance&rh=p_8%3A50-99", "🔥 Clearance", 'clearance'),
     ("https://www.amazon.sa/s?k=last+chance&rh=p_8%3A50-99", "🔥 Last Chance", 'clearance'),
     ("https://www.amazon.sa/s?k=final+sale&rh=p_8%3A50-99", "🔥 Final Sale", 'clearance'),
@@ -364,7 +342,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=mega+deal&rh=p_8%3A50-99", "🎯 Mega Deal", 'clearance'),
     ("https://www.amazon.sa/s?k=big+sale&rh=p_8%3A50-99", "🎪 Big Sale", 'clearance'),
     
-    # 🍎 Apple كامل
     ("https://www.amazon.sa/s?k=iphone&rh=p_8%3A30-99", "🍎 iPhone", 'search'),
     ("https://www.amazon.sa/s?k=ipad&rh=p_8%3A30-99", "🍎 iPad", 'search'),
     ("https://www.amazon.sa/s?k=macbook&rh=p_8%3A30-99", "🍎 MacBook", 'search'),
@@ -374,7 +351,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=airtag&rh=p_8%3A30-99", "🍎 AirTag", 'search'),
     ("https://www.amazon.sa/s?k=homepod&rh=p_8%3A30-99", "🍎 HomePod", 'search'),
     
-    # 📱 Samsung كامل
     ("https://www.amazon.sa/s?k=samsung+galaxy&rh=p_8%3A30-99", "📱 Galaxy Phone", 'search'),
     ("https://www.amazon.sa/s?k=samsung+tablet&rh=p_8%3A30-99", "📱 Galaxy Tab", 'search'),
     ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "📱 Galaxy Watch", 'search'),
@@ -382,7 +358,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=samsung+tv&rh=p_8%3A30-99", "📱 Samsung TV", 'search'),
     ("https://www.amazon.sa/s?k=samsung+monitor&rh=p_8%3A30-99", "📱 Samsung Monitor", 'search'),
     
-    # 🎧 سماعات
     ("https://www.amazon.sa/s?k=sony+headphones&rh=p_8%3A30-99", "🎧 Sony Headphones", 'search'),
     ("https://www.amazon.sa/s?k=bose+headphones&rh=p_8%3A30-99", "🎧 Bose Headphones", 'search'),
     ("https://www.amazon.sa/s?k=beats+headphones&rh=p_8%3A30-99", "🎧 Beats Headphones", 'search'),
@@ -392,7 +367,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=skullcandy&rh=p_8%3A30-99", "🎧 Skullcandy", 'search'),
     ("https://www.amazon.sa/s?k=sennheiser&rh=p_8%3A30-99", "🎧 Sennheiser", 'search'),
     
-    # 💻 لابتوبات
     ("https://www.amazon.sa/s?k=lenovo+laptop&rh=p_8%3A30-99", "💻 Lenovo Laptop", 'search'),
     ("https://www.amazon.sa/s?k=hp+laptop&rh=p_8%3A30-99", "💻 HP Laptop", 'search'),
     ("https://www.amazon.sa/s?k=dell+laptop&rh=p_8%3A30-99", "💻 Dell Laptop", 'search'),
@@ -402,7 +376,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=razer+laptop&rh=p_8%3A30-99", "💻 Razer Laptop", 'search'),
     ("https://www.amazon.sa/s?k=alienware&rh=p_8%3A30-99", "💻 Alienware", 'search'),
     
-    # 🎮 gaming
     ("https://www.amazon.sa/s?k=playstation+5&rh=p_8%3A30-99", "🎮 PS5", 'search'),
     ("https://www.amazon.sa/s?k=playstation+4&rh=p_8%3A30-99", "🎮 PS4", 'search'),
     ("https://www.amazon.sa/s?k=xbox+series&rh=p_8%3A30-99", "🎮 Xbox Series", 'search'),
@@ -413,7 +386,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=gaming+chair&rh=p_8%3A30-99", "🎮 Gaming Chair", 'search'),
     ("https://www.amazon.sa/s?k=rtx+graphics&rh=p_8%3A30-99", "🎮 RTX Graphics", 'search'),
     
-    # 📷 كاميرات
     ("https://www.amazon.sa/s?k=canon+camera&rh=p_8%3A30-99", "📷 Canon Camera", 'search'),
     ("https://www.amazon.sa/s?k=nikon+camera&rh=p_8%3A30-99", "📷 Nikon Camera", 'search'),
     ("https://www.amazon.sa/s?k=sony+camera&rh=p_8%3A30-99", "📷 Sony Camera", 'search'),
@@ -421,7 +393,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=gopro&rh=p_8%3A30-99", "📷 GoPro", 'search'),
     ("https://www.amazon.sa/s?k=dji&rh=p_8%3A30-99", "📷 DJI Drone", 'search'),
     
-    # ⌚ ساعات
     ("https://www.amazon.sa/s?k=apple+watch&rh=p_8%3A30-99", "⌚ Apple Watch", 'search'),
     ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "⌚ Galaxy Watch", 'search'),
     ("https://www.amazon.sa/s?k=garmin&rh=p_8%3A30-99", "⌚ Garmin", 'search'),
@@ -433,7 +404,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=seiko&rh=p_8%3A30-99", "⌚ Seiko", 'search'),
     ("https://www.amazon.sa/s?k=citizen&rh=p_8%3A30-99", "⌚ Citizen", 'search'),
     
-    # 🌸 عطور فاخرة
     ("https://www.amazon.sa/s?k=chanel+perfume&rh=p_8%3A30-99", "🌸 Chanel", 'search'),
     ("https://www.amazon.sa/s?k=dior+perfume&rh=p_8%3A30-99", "🌸 Dior", 'search'),
     ("https://www.amazon.sa/s?k=gucci+perfume&rh=p_8%3A30-99", "🌸 Gucci", 'search'),
@@ -447,7 +417,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=creed+perfume&rh=p_8%3A30-99", "🌸 Creed", 'search'),
     ("https://www.amazon.sa/s?k=jo+malone&rh=p_8%3A30-99", "🌸 Jo Malone", 'search'),
     
-    # 👟 أحذية رياضية
     ("https://www.amazon.sa/s?k=nike+shoes&rh=p_8%3A30-99", "👟 Nike Shoes", 'search'),
     ("https://www.amazon.sa/s?k=adidas+shoes&rh=p_8%3A30-99", "👟 Adidas Shoes", 'search'),
     ("https://www.amazon.sa/s?k=jordan&rh=p_8%3A30-99", "👟 Jordan", 'search'),
@@ -461,7 +430,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=converse&rh=p_8%3A30-99", "👟 Converse", 'search'),
     ("https://www.amazon.sa/s?k=crocs&rh=p_8%3A30-99", "👟 Crocs", 'search'),
     
-    # 👔 ملابس رجالي
     ("https://www.amazon.sa/s?k=calvin+klein+men&rh=p_8%3A30-99", "👔 CK Men", 'search'),
     ("https://www.amazon.sa/s?k=tommy+hilfiger+men&rh=p_8%3A30-99", "👔 Tommy Men", 'search'),
     ("https://www.amazon.sa/s?k=ralph+lauren+men&rh=p_8%3A30-99", "👔 RL Men", 'search'),
@@ -472,7 +440,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=diesel&rh=p_8%3A30-99", "👔 Diesel", 'search'),
     ("https://www.amazon.sa/s?k=g+star&rh=p_8%3A30-99", "👔 G-Star", 'search'),
     
-    # 👗 ملابس حريمي
     ("https://www.amazon.sa/s?k=michael+kors+bag&rh=p_8%3A30-99", "👜 MK Bags", 'search'),
     ("https://www.amazon.sa/s?k=kate+spade&rh=p_8%3A30-99", "👜 Kate Spade", 'search'),
     ("https://www.amazon.sa/s?k=coach+bag&rh=p_8%3A30-99", "👜 Coach", 'search'),
@@ -480,7 +447,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=fossil+bag&rh=p_8%3A30-99", "👜 Fossil Bag", 'search'),
     ("https://www.amazon.sa/s?k=vera+bradley&rh=p_8%3A30-99", "👜 Vera Bradley", 'search'),
     
-    # 💎 مجوهرات
     ("https://www.amazon.sa/s?k=swarovski&rh=p_8%3A30-99", "💎 Swarovski", 'search'),
     ("https://www.amazon.sa/s?k=pandora&rh=p_8%3A30-99", "💎 Pandora", 'search'),
     ("https://www.amazon.sa/s?k=tiffany&rh=p_8%3A30-99", "💎 Tiffany", 'search'),
@@ -488,7 +454,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=bulova&rh=p_8%3A30-99", "💎 Bulova", 'search'),
     ("https://www.amazon.sa/s?k=anne+klein&rh=p_8%3A30-99", "💎 Anne Klein", 'search'),
     
-    # 🕶️ نظارات
     ("https://www.amazon.sa/s?k=ray+ban&rh=p_8%3A30-99", "🕶️ Ray Ban", 'search'),
     ("https://www.amazon.sa/s?k=oakley&rh=p_8%3A30-99", "🕶️ Oakley", 'search'),
     ("https://www.amazon.sa/s?k=persol&rh=p_8%3A30-99", "🕶️ Persol", 'search'),
@@ -496,7 +461,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=gucci+sunglasses&rh=p_8%3A30-99", "🕶️ Gucci Sun", 'search'),
     ("https://www.amazon.sa/s?k=burberry+sunglasses&rh=p_8%3A30-99", "🕶️ Burberry Sun", 'search'),
     
-    # 💄 مكياج
     ("https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99", "💄 MAC", 'search'),
     ("https://www.amazon.sa/s?k=nyx+makeup&rh=p_8%3A30-99", "💄 NYX", 'search'),
     ("https://www.amazon.sa/s?k=maybelline+makeup&rh=p_8%3A30-99", "💄 Maybelline", 'search'),
@@ -508,7 +472,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=huda+beauty&rh=p_8%3A30-99", "💄 Huda Beauty", 'search'),
     ("https://www.amazon.sa/s?k=fenty+beauty&rh=p_8%3A30-99", "💄 Fenty", 'search'),
     
-    # 🧴 عناية شخصية
     ("https://www.amazon.sa/s?k=olay&rh=p_8%3A30-99", "💆 Olay", 'search'),
     ("https://www.amazon.sa/s?k=neutrogena&rh=p_8%3A30-99", "💆 Neutrogena", 'search'),
     ("https://www.amazon.sa/s?k=cerave&rh=p_8%3A30-99", "💆 CeraVe", 'search'),
@@ -519,7 +482,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=aveeno&rh=p_8%3A30-99", "💆 Aveeno", 'search'),
     ("https://www.amazon.sa/s?k=bioderma&rh=p_8%3A30-99", "💆 Bioderma", 'search'),
     
-    # 👶 أطفال
     ("https://www.amazon.sa/s?k=pampers&rh=p_8%3A30-99", "👶 Pampers", 'search'),
     ("https://www.amazon.sa/s?k=huggies&rh=p_8%3A30-99", "👶 Huggies", 'search'),
     ("https://www.amazon.sa/s?k=johnson+baby&rh=p_8%3A30-99", "👶 Johnson's", 'search'),
@@ -534,7 +496,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=vtech&rh=p_8%3A30-99", "🔤 VTech", 'search'),
     ("https://www.amazon.sa/s?k=leapfrog&rh=p_8%3A30-99", "🐸 LeapFrog", 'search'),
     
-    # 🏋️ رياضة
     ("https://www.amazon.sa/s?k=fitness+equipment&rh=p_8%3A30-99", "🏋️ Fitness", 'search'),
     ("https://www.amazon.sa/s?k=yoga+mat&rh=p_8%3A30-99", "🧘 Yoga Mat", 'search'),
     ("https://www.amazon.sa/s?k=dumbbells&rh=p_8%3A30-99", "🏋️ Dumbbells", 'search'),
@@ -552,7 +513,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=dymatize&rh=p_8%3A30-99", "💪 Dymatize", 'search'),
     ("https://www.amazon.sa/s?k=bpi+sports&rh=p_8%3A30-99", "💪 BPI", 'search'),
     
-    # 🏠 منزل
     ("https://www.amazon.sa/s?k=philips+air+fryer&rh=p_8%3A30-99", "🏠 Philips AirFryer", 'search'),
     ("https://www.amazon.sa/s?k=ninja+blender&rh=p_8%3A30-99", "🥤 Ninja", 'search'),
     ("https://www.amazon.sa/s?k=nespresso&rh=p_8%3A30-99", "☕ Nespresso", 'search'),
@@ -569,7 +529,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=ecovacs&rh=p_8%3A30-99", "🏠 Ecovacs", 'search'),
     ("https://www.amazon.sa/s?k=braun+blender&rh=p_8%3A30-99", "🏠 Braun", 'search'),
     
-    # 🔧 أدوات
     ("https://www.amazon.sa/s?k=bosch+tools&rh=p_8%3A30-99", "🔧 Bosch", 'search'),
     ("https://www.amazon.sa/s?k=makita&rh=p_8%3A30-99", "🔧 Makita", 'search'),
     ("https://www.amazon.sa/s?k=dewalt&rh=p_8%3A30-99", "🔧 DeWalt", 'search'),
@@ -579,7 +538,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=ryobi&rh=p_8%3A30-99", "🔧 Ryobi", 'search'),
     ("https://www.amazon.sa/s?k=worx&rh=p_8%3A30-99", "🔧 Worx", 'search'),
     
-    # 🚗 سيارات
     ("https://www.amazon.sa/s?k=michelin+tires&rh=p_8%3A30-99", "🚗 Michelin", 'search'),
     ("https://www.amazon.sa/s?k=bridgestone+tires&rh=p_8%3A30-99", "🚗 Bridgestone", 'search'),
     ("https://www.amazon.sa/s?k=goodyear+tires&rh=p_8%3A30-99", "🚗 Goodyear", 'search'),
@@ -590,11 +548,9 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=mobil+1&rh=p_8%3A30-99", "🚗 Mobil 1", 'search'),
     ("https://www.amazon.sa/s?k=castrol&rh=p_8%3A30-99", "🚗 Castrol", 'search'),
     
-    # 📚 كتب
     ("https://www.amazon.sa/s?k=kindle&rh=p_8%3A30-99", "📚 Kindle", 'search'),
     ("https://www.amazon.sa/s?k=harry+potter+book&rh=p_8%3A30-99", "📚 Harry Potter", 'search'),
     
-    # 🌙 سعودي خاص
     ("https://www.amazon.sa/s?k=dates&rh=p_8%3A30-99", "🌴 Dates", 'search'),
     ("https://www.amazon.sa/s?k=oud&rh=p_8%3A30-99", "🌿 Oud", 'search'),
     ("https://www.amazon.sa/s?k=bakhoor&rh=p_8%3A30-99", "🌿 Bakhoor", 'search'),
@@ -606,7 +562,6 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=hajj&rh=p_8%3A30-99", "🕋 Hajj", 'search'),
     ("https://www.amazon.sa/s?k=umrah&rh=p_8%3A30-99", "🕋 Umrah", 'search'),
     
-    # 💎 فاخر
     ("https://www.amazon.sa/s?k=louis+vuitton&rh=p_8%3A30-99", "👜 LV", 'search'),
     ("https://www.amazon.sa/s?k=hermes&rh=p_8%3A30-99", "👜 Hermes", 'search'),
     ("https://www.amazon.sa/s?k=coach&rh=p_8%3A30-99", "👜 Coach", 'search'),
@@ -618,81 +573,100 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=rimowa&rh=p_8%3A30-99", "🧳 Rimowa", 'search'),
 ]
 
-# ========== البحث مع التدوير ==========
 def search_all_deals(chat_id, status_message_id):
     all_deals = []
     session = create_session()
     
-    # توليد جميع الصفحات إذا لم تكن موجودة
     if not page_rotator.all_pages:
         page_rotator.generate_all_pages(CATEGORIES_DEF)
         page_rotator.load_state()
     
-    # الحصول على دفعة جديدة من الصفحات (50 صفحة في كل مرة)
+    # البحث في دفعات حتى نحصل على 40 نتيجة مميزة
     batch_size = 50
-    pages_to_search = page_rotator.get_next_batch(batch_size)
+    max_attempts = 10  # عدد محاولات البحث لضمان الحصول على 40 نتيجة
     
-    if not pages_to_search:
-        logger.error("No pages available for search")
-        return []
-    
-    total_pages = len(pages_to_search)
-    processed = 0
-    
-    for page_info in pages_to_search:
-        try:
-            processed += 1
+    for attempt in range(max_attempts):
+        if len(all_deals) >= TARGET_DEALS_COUNT * 3:  # نجمع أكثر لنضمن جودة التصفية
+            break
             
-            # تحديث الحالة كل 5 صفحات
-            if processed % 5 == 0:
-                stats = page_rotator.get_stats()
-                progress = f"⏳ جاري البحث... ({processed}/{total_pages} صفحة)\n📍 {page_info['category']} - صفحة {page_info['page_num']}\n🔄 دورة: {stats['rotation_count']}"
-                try:
-                    updater.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=status_message_id,
-                        text=progress
-                    )
-                except:
-                    pass
-            
-            logger.info(f"🔍 [{page_info['category']}] Page {page_info['page_num']}")
-            html = fetch_page(session, page_info['url'])
-            if not html:
-                continue
-            
-            soup = BeautifulSoup(html, 'html.parser')
-            
-            items = []
-            # محاولة استخراج العناصر من الصفحة
-            if 'best_sellers' in page_info['type']:
-                items.extend(soup.find_all('li', class_='zg-item-immersion'))
-                items.extend(soup.find_all('div', class_='p13n-sc-uncoverable-faceout'))
-            
-            items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
-            items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
-            items.extend(soup.find_all('div', class_='s-result-item'))
-            items.extend(soup.find_all('div', class_='a-section'))
-            
-            logger.info(f"   Found {len(items)} items")
-            
-            for item in items:
-                try:
-                    deal = parse_item(item, page_info['category'], 'best_sellers' in page_info['type'])
-                    if deal:
-                        all_deals.append(deal)
-                except:
+        pages_to_search = page_rotator.get_next_batch(batch_size)
+        
+        if not pages_to_search:
+            logger.error("No pages available for search")
+            break
+        
+        total_pages = len(pages_to_search)
+        processed = 0
+        
+        for page_info in pages_to_search:
+            try:
+                processed += 1
+                
+                if processed % 5 == 0:
+                    stats = page_rotator.get_stats()
+                    progress = f"⏳ جاري البحث... ({processed}/{total_pages} صفحة)\n📍 {page_info['category']} - صفحة {page_info['page_num']}\n🔄 دورة: {stats['rotation_count']}\n✅ تم جمع: {len(all_deals)} صفقة"
+                    try:
+                        updater.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=status_message_id,
+                            text=progress
+                        )
+                    except:
+                        pass
+                
+                logger.info(f"🔍 [{page_info['category']}] Page {page_info['page_num']}")
+                html = fetch_page(session, page_info['url'])
+                if not html:
                     continue
-            
-            # تأخير بين الصفحات
-            time.sleep(random.uniform(1.5, 3))
-            
-        except Exception as e:
-            logger.error(f"Error in {page_info['category']}: {e}")
+                
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                items = []
+                if 'best_sellers' in page_info['type']:
+                    items.extend(soup.find_all('li', class_='zg-item-immersion'))
+                    items.extend(soup.find_all('div', class_='p13n-sc-uncoverable-faceout'))
+                
+                items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
+                items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
+                items.extend(soup.find_all('div', class_='s-result-item'))
+                items.extend(soup.find_all('div', class_='a-section'))
+                
+                logger.info(f"   Found {len(items)} items")
+                
+                for item in items:
+                    try:
+                        deal = parse_item(item, page_info['category'], 'best_sellers' in page_info['type'])
+                        if deal and is_valid_deal(deal):
+                            all_deals.append(deal)
+                    except:
+                        continue
+                
+                time.sleep(random.uniform(1.5, 3))
+                
+            except Exception as e:
+                logger.error(f"Error in {page_info['category']}: {e}")
+        
+        logger.info(f"✅ Attempt {attempt+1}: Collected {len(all_deals)} valid deals")
     
     stats = page_rotator.get_stats()
-    logger.info(f"✅ Total: {len(all_deals)} deals from {processed} pages | Progress: {stats['progress_percent']:.1f}%")
+    logger.info(f"✅ Total collected: {len(all_deals)} deals | Progress: {stats['progress_percent']:.1f}%")
     return all_deals
+
+def is_valid_deal(deal):
+    """التحقق من شروط الصفقة: خصم >50% وتقييم >3.5"""
+    # التحقق من الخصم
+    if deal['discount'] < MIN_DISCOUNT:
+        return False
+    
+    # التحقق من التقييم
+    if deal['rating'] < MIN_RATING:
+        return False
+    
+    # التحقق من السعر المنطقي
+    if deal['price'] <= 0 or deal['price'] > 10000:
+        return False
+    
+    return True
 
 def parse_item(item, category, is_best_seller):
     price = None
@@ -794,51 +768,56 @@ def parse_item(item, category, is_best_seller):
     }
 
 def filter_premium_deals(deals):
+    """اختيار 40 نتيجة عشوائية مميزة بدون تكرار"""
     filtered = []
-    seen_in_run = set()
+    seen_ids = set()
+    
+    # ترتيب عشوائي للنتائج
+    random.shuffle(deals)
     
     for deal in deals:
-        disc = deal['discount']
-        rating = deal['rating']
-        is_bs = deal.get('is_best_seller', False)
-        pid = deal['id']
-        title = deal['title']
+        deal_id = deal['id']
         
-        min_discount = 50 if 'Warehouse' in deal['category'] or 'Outlet' in deal['category'] or 'Clearance' in deal['category'] else (60 if is_bs else 65)
+        # التأكد من عدم التكرار في هذه الدفعة
+        if deal_id in seen_ids:
+            continue
         
-        has_discount = disc >= min_discount
-        has_rating = rating >= 3.0
-        is_reasonable = 0.5 < deal['price'] < 10000
+        # التأكد من عدم الإرسال سابقاً
+        if deal_id in sent_products:
+            continue
         
-        if has_discount and has_rating and is_reasonable:
-            if pid in sent_products or pid in seen_in_run:
-                continue
-            
-            if is_similar_product(title):
-                continue
-            
-            seen_in_run.add(pid)
-            
-            if deal['price'] < 1:
-                deal['type'] = '🔥 GLITCH'
-            elif 'Warehouse' in deal['category']:
-                deal['type'] = '🏭 WAREHOUSE'
-            elif 'Outlet' in deal['category']:
-                deal['type'] = '🎁 OUTLET'
-            elif 'Coupon' in deal['category']:
-                deal['type'] = '🎟️ COUPON'
-            elif 'Prime' in deal['category']:
-                deal['type'] = '👑 PRIME'
-            elif 'Lightning' in deal['category']:
-                deal['type'] = '⚡ LIGHTNING'
-            elif is_bs:
-                deal['type'] = '⭐ BEST SELLER'
-            else:
-                deal['type'] = f'💰 {disc}%'
-            
-            deal['savings'] = round(deal['old_price'] - deal['price'], 2) if deal['old_price'] > 0 else 0
-            filtered.append(deal)
+        # التأكد من عدم التشابه
+        if is_similar_product(deal['title']):
+            continue
+        
+        seen_ids.add(deal_id)
+        
+        # تحديد نوع الصفقة
+        if deal['price'] < 1:
+            deal['type'] = '🔥 GLITCH'
+        elif 'Warehouse' in deal['category']:
+            deal['type'] = '🏭 WAREHOUSE'
+        elif 'Outlet' in deal['category']:
+            deal['type'] = '🎁 OUTLET'
+        elif 'Coupon' in deal['category']:
+            deal['type'] = '🎟️ COUPON'
+        elif 'Prime' in deal['category']:
+            deal['type'] = '👑 PRIME'
+        elif 'Lightning' in deal['category']:
+            deal['type'] = '⚡ LIGHTNING'
+        elif deal.get('is_best_seller'):
+            deal['type'] = '⭐ BEST SELLER'
+        else:
+            deal['type'] = f'💰 {deal["discount"]}%'
+        
+        deal['savings'] = round(deal['old_price'] - deal['price'], 2) if deal['old_price'] > 0 else 0
+        filtered.append(deal)
+        
+        # التوقف عند الوصول للهدف
+        if len(filtered) >= TARGET_DEALS_COUNT:
+            break
     
+    # ترتيب النهائي حسب الأولوية
     filtered.sort(key=lambda x: (
         0 if x['type'] == '🔥 GLITCH' else 1,
         0 if x['type'] == '🏭 WAREHOUSE' else 1,
@@ -846,6 +825,7 @@ def filter_premium_deals(deals):
         0 if x.get('is_best_seller') else 1,
         -x['discount']
     ))
+    
     return filtered
 
 def send_deals(deals, chat_id, status_message_id):
@@ -862,7 +842,6 @@ def send_deals(deals, chat_id, status_message_id):
             updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
             return
         
-        # إضافة إحصائيات التدوير
         stats = page_rotator.get_stats()
         
         bs = sum(1 for d in deals if d.get('is_best_seller'))
@@ -883,6 +862,9 @@ def send_deals(deals, chat_id, status_message_id):
 ⚡ Lightning: {lightning}
 ⭐ Best Sellers: {bs}
 💰 خصومات عادية: {len(deals)-bs-glitch-warehouse-outlet-lightning}
+
+📉 *الحد الأدنى للخصم:* {MIN_DISCOUNT}%
+⭐ *الحد الأدنى للتقييم:* {MIN_RATING} نجمة
         """
         updater.bot.send_message(chat_id=chat_id, text=summary, parse_mode='Markdown')
         
@@ -924,13 +906,13 @@ def send_deals(deals, chat_id, status_message_id):
                     pass
         
         save_database()
-        logger.info(f"✅ Done! Total: {len(sent_products)}")
+        logger.info(f"✅ Done! Sent {len(deals)} deals. Total: {len(sent_products)}")
         
     finally:
         is_scanning = False
 
 def start_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text("""
+    update.message.reply_text(f"""
 👋 *أهلاً بيك في Amazon Deals Bot!*
 
 🎯 أنا ببحث في:
@@ -944,7 +926,9 @@ def start_cmd(update: Update, context: CallbackContext):
 • Best Sellers ⭐
 • براندات فاخرة 💎
 
-🔥 خصومات من 50% لـ 99%!
+🔥 *شروط العرض:*
+• خصم فوق {MIN_DISCOUNT}%
+• تقييم فوق {MIN_RATING} نجمة
 
 اكتب *Hi* عشان تبدأ البحث!
     """, parse_mode='Markdown')
@@ -960,7 +944,6 @@ def hi_cmd(update: Update, context: CallbackContext):
     
     is_scanning = True
     
-    # تحميل حالة التدوير
     if not page_rotator.all_pages:
         page_rotator.generate_all_pages(CATEGORIES_DEF)
         page_rotator.load_state()
@@ -968,9 +951,11 @@ def hi_cmd(update: Update, context: CallbackContext):
     stats = page_rotator.get_stats()
     
     status_msg = update.message.reply_text(
-        f"🔍 *بدأت البحث في دفعة جديدة...*\n"
+        f"🔍 *بدأت البحث عن {TARGET_DEALS_COUNT} صفقة مميزة...*\n"
         f"📊 التقدم: {stats['progress_percent']:.1f}%\n"
         f"🔄 الدورة: {stats['rotation_count']}\n"
+        f"📉 الحد الأدنى للخصم: {MIN_DISCOUNT}%\n"
+        f"⭐ الحد الأدنى للتقييم: {MIN_RATING}\n"
         f"⏱️ 5-10 دقائق", 
         parse_mode='Markdown'
     )
@@ -1007,6 +992,11 @@ def status_cmd(update: Update, context: CallbackContext):
 🔄 دورة التدوير: {stats['rotation_count']}
 ⏰ التوقيت: {datetime.now().strftime('%H:%M:%S')}
 
+🎯 *إعدادات البحث:*
+• عدد النتائج: {TARGET_DEALS_COUNT}
+• الحد الأدنى للخصم: {MIN_DISCOUNT}%
+• الحد الأدنى للتقييم: {MIN_RATING}
+
 ✅ البوت شغال بكفاءة!
     """, parse_mode='Markdown')
 
@@ -1021,7 +1011,6 @@ def clear_cmd(update: Update, context: CallbackContext):
     update.message.reply_text("🗑️ *تم مسح كل البيانات!*\n\nالآن البوت هيبدأ من جديد.", parse_mode='Markdown')
 
 def reset_rotation_cmd(update: Update, context: CallbackContext):
-    """أمر إعادة تعيين التدوير"""
     page_rotator.visited_pages.clear()
     page_rotator.rotation_count = 0
     page_rotator.save_state()
@@ -1044,7 +1033,10 @@ class HealthHandler(BaseHTTPRequestHandler):
             "pages": stats['total_pages'],
             "visited_pages": stats['visited_pages'],
             "progress": stats['progress_percent'],
-            "rotation_count": stats['rotation_count']
+            "rotation_count": stats['rotation_count'],
+            "target_deals": TARGET_DEALS_COUNT,
+            "min_discount": MIN_DISCOUNT,
+            "min_rating": MIN_RATING
         })
         self.wfile.write(response.encode())
     
