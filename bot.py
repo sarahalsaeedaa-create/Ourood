@@ -23,8 +23,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TELEGRAM_BOT_TOKEN = os.getenv("8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok")
-PORT = int(os.environ.get("PORT", 8080))
+# ✅ التوكن مكتوب مباشرة
+TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
+PORT = int(os.environ.get("PORT", 10000))
 
 ua = UserAgent()
 sent_products = set()
@@ -48,10 +49,11 @@ class HealthHandler(BaseHTTPRequestHandler):
         return
 
 def run_health_server():
+    health_port = 8080
     while True:
         try:
-            server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
-            logger.info(f"🌐 Health server running on {PORT}")
+            server = HTTPServer(('0.0.0.0', health_port), HealthHandler)
+            logger.info(f"🌐 Health server running on {health_port}")
             server.serve_forever()
         except Exception as e:
             logger.error(f"Health crash: {e}")
@@ -66,8 +68,8 @@ def load_database():
                 data = json.load(f)
                 sent_products = set(data.get('ids', []))
                 sent_hashes = set(data.get('hashes', []))
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"DB Load Error: {e}")
 
 def save_database():
     try:
@@ -76,8 +78,8 @@ def save_database():
                 'ids': list(sent_products)[-3000:],
                 'hashes': list(sent_hashes)[-3000:]
             }, f)
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"DB Save Error: {e}")
 
 # ================== أدوات ==================
 def extract_asin(link):
@@ -105,7 +107,8 @@ def fetch_page(session, url):
         r = session.get(url, timeout=20)
         if r.status_code == 200:
             return r.text
-    except:
+    except Exception as e:
+        logger.error(f"Fetch error: {e}")
         return None
 
 def parse_item(item):
@@ -127,7 +130,8 @@ def parse_item(item):
             'discount': random.randint(50, 80),
             'id': hashlib.md5(title.encode()).hexdigest()
         }
-    except:
+    except Exception as e:
+        logger.error(f"Parse error: {e}")
         return None
 
 def search_all_deals():
@@ -168,10 +172,12 @@ def send_deals(deals, chat_id):
 ⭐ {d['rating']:.1f}
 
 """
-        updater.bot.send_message(chat_id=chat_id, text=msg)
-
-        sent_products.add(d['id'])
-        sent_hashes.add(create_title_hash(d['title']))
+        try:
+            updater.bot.send_message(chat_id=chat_id, text=msg)
+            sent_products.add(d['id'])
+            sent_hashes.add(create_title_hash(d['title']))
+        except Exception as e:
+            logger.error(f"Send error: {e}")
 
         time.sleep(1)
 
@@ -189,18 +195,23 @@ def hi_cmd(update: Update, context: CallbackContext):
         return
 
     is_scanning = True
+    update.message.reply_text("🔍 بدورلك على العروض...")
 
     try:
         deals = search_all_deals()
-        send_deals(deals, update.effective_chat.id)
+        if deals:
+            send_deals(deals, update.effective_chat.id)
+            update.message.reply_text(f"✅ خلصت! لقيت {len(deals)} عرض")
+        else:
+            update.message.reply_text("❌ مفيش عروض دلوقتي")
     except Exception as e:
-        logger.error(e)
-        update.message.reply_text("❌ Error")
+        logger.error(f"Error in hi_cmd: {e}")
+        update.message.reply_text("❌ حصل خطأ")
     finally:
         is_scanning = False
 
 def status_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text("✅ شغال")
+    update.message.reply_text("✅ البوت شغال")
 
 # ================== تشغيل ==================
 def start_bot():
@@ -208,14 +219,15 @@ def start_bot():
 
     load_database()
 
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start_cmd))
     dp.add_handler(CommandHandler("status", status_cmd))
-    dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$'), hi_cmd))
+    dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$') & Filters.text, hi_cmd))
 
-    updater.start_polling(drop_pending_updates=True)
+    logger.info("🤖 Bot started polling...")
+    updater.start_polling(drop_pending_updates=True, timeout=30)
     updater.idle()
 
 def main():
