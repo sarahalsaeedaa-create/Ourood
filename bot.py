@@ -13,9 +13,8 @@ import time
 import random
 import hashlib
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from flask import Flask, request
 from collections import deque
-from urllib.parse import urljoin, quote
 
 # ================== إعدادات عامة ==================
 logging.basicConfig(
@@ -26,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
 PORT = int(os.environ.get("PORT", 10000))
+
+# Flask app للـ Webhook
+app = Flask(__name__)
 
 ua = UserAgent()
 sent_products = set()
@@ -54,27 +56,6 @@ CATEGORIES = {
 }
 
 last_page_tracker = {cat: 0 for cat in CATEGORIES.keys()}
-
-# ================== Health Server ==================
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'OK - Bot is running')
-
-    def log_message(self, format, *args):
-        logger.info(f"Health check: {format % args}")
-
-def run_health_server():
-    while True:
-        try:
-            server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
-            logger.info(f"🌐 Health server on port {PORT}")
-            server.serve_forever()
-        except Exception as e:
-            logger.error(f"Health error: {e}")
-            time.sleep(3)
 
 # ================== Database ==================
 def load_database():
@@ -244,8 +225,6 @@ def parse_item(item):
         free_shipping = bool(item.select_one('[aria-label*="شحن مجاني"]') or 'FREE' in item.get_text().upper())
         is_prime = bool(item.select_one('.a-icon-prime') or 'prime' in item.get_text().lower())
         
-        # ❌ تم إزالة استخراج الصورة
-        
         return {
             'title': title,
             'price': price,
@@ -347,7 +326,7 @@ def search_all_deals():
     logger.info(f"🎯 Final: {len(unique_deals)} deals")
     return unique_deals
 
-# ================== إرسال (بدون صور) ==================
+# ================== إرسال ==================
 def send_deals(deals, chat_id):
     if not deals:
         updater.bot.send_message(
@@ -400,7 +379,6 @@ def send_deals(deals, chat_id):
 """
         
         try:
-            # ❌ إرسال نص فقط - بدون صور
             updater.bot.send_message(
                 chat_id=chat_id, 
                 text=msg, 
@@ -419,7 +397,19 @@ def send_deals(deals, chat_id):
     
     save_database()
 
-# ================== أوامر ==================
+# ================== Flask Routes (Webhook) ==================
+@app.route('/')
+def home():
+    return "🤖 Bot is running!"
+
+@app.route(f'/{TELEGRAM_BOT_TOKEN}', methods=['POST'])
+def webhook():
+    """استقبال updates من Telegram"""
+    update = Update.de_json(request.get_json(force=True), updater.bot)
+    updater.dispatcher.process_update(update)
+    return 'OK'
+
+# ================== أوامر Telegram ==================
 def start_cmd(update: Update, context: CallbackContext):
     welcome = """👋 *أهلا بيك في بوت عروض أمازون!*
 
@@ -473,32 +463,28 @@ def status_cmd(update: Update, context: CallbackContext):
     update.message.reply_text(msg, parse_mode='Markdown')
 
 # ================== تشغيل ==================
-def start_bot():
+def setup_bot():
     global updater
+    
     load_database()
-
+    
     updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
 
     dp.add_handler(CommandHandler("start", start_cmd))
     dp.add_handler(CommandHandler("status", status_cmd))
     dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$') & Filters.text, hi_cmd))
-
-    logger.info("🤖 Bot started!")
-    updater.start_polling(drop_pending_updates=True, timeout=30)
-    updater.idle()
-
-def main():
-    health_thread = threading.Thread(target=run_health_server, daemon=True)
-    health_thread.start()
-    time.sleep(2)
     
-    while True:
-        try:
-            start_bot()
-        except Exception as e:
-            logger.error(f"Crash: {e}")
-            time.sleep(5)
+    # إعداد Webhook
+    webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'your-service.onrender.com')}/{TELEGRAM_BOT_TOKEN}"
+    
+    updater.bot.set_webhook(url=webhook_url)
+    logger.info(f"🤖 Webhook set: {webhook_url}")
+    
+    return updater
 
 if __name__ == "__main__":
-    main()
+    setup_bot()
+    
+    # شغل Flask
+    app.run(host='0.0.0.0', port=PORT)
