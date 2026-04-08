@@ -33,13 +33,13 @@ sent_hashes = set()
 is_scanning = False
 updater = None
 
-# ============ إعدادات البحث المتقدمة ============
-TARGET_DEALS_COUNT = 40
-MIN_DISCOUNT = 50
-MIN_RATING = 3.0
-PAGES_PER_SESSION = 5  # عدد الصفحات في كل مرة
+# ============ إعدادات البحث ============
+TARGET_DEALS_COUNT = 20  # الهدف: 20 منتج
+MIN_DISCOUNT = 50        # خصم 50%+
+MIN_RATING = 3.0         # تقييم 3+ نجوم
+MAX_PAGES_PER_CATEGORY = 20  # أقصى صفحات للقسم الواحد
 
-# الأقسام المختلفة للبحث فيها
+# الأقسام للبحث
 CATEGORIES = {
     'electronics': 'https://www.amazon.sa/s?k=electronics&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'fashion': 'https://www.amazon.sa/s?k=fashion&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
@@ -47,7 +47,7 @@ CATEGORIES = {
     'beauty': 'https://www.amazon.sa/s?k=beauty&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'sports': 'https://www.amazon.sa/s?k=sports&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'toys': 'https://www.amazon.sa/s?k=toys&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'kitchen': 'https://www.amazon.sa/s?f=kitchen&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
+    'kitchen': 'https://www.amazon.sa/s?k=kitchen&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'phones': 'https://www.amazon.sa/s?k=smartphones&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'laptops': 'https://www.amazon.sa/s?k=laptops&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'grocery': 'https://www.amazon.sa/s?k=grocery&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
@@ -55,15 +55,12 @@ CATEGORIES = {
     'baby': 'https://www.amazon.sa/s?k=baby&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'tools': 'https://www.amazon.sa/s?k=tools&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'health': 'https://www.amazon.sa/s?k=health&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'books': 'https://www.amazon.sa/s?k=books&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'gaming': 'https://www.amazon.sa/s?k=gaming&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'watches': 'https://www.amazon.sa/s?k=watches&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'jewelry': 'https://www.amazon.sa/s?k=jewelry&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'furniture': 'https://www.amazon.sa/s?k=furniture&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'pet': 'https://www.amazon.sa/s?k=pet+supplies&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
 }
 
-# متغير لتتبع آخر صفحة تم البحث فيها لكل قسم
+# متغير لتتبع آخر صفحة لكل قسم
 last_page_tracker = {cat: 0 for cat in CATEGORIES.keys()}
 
 # ================== Health Server ==================
@@ -97,7 +94,6 @@ def load_database():
                 data = json.load(f)
                 sent_products = set(data.get('ids', []))
                 sent_hashes = set(data.get('hashes', []))
-                # تحميل آخر صفحة لكل قسم
                 saved_pages = data.get('last_pages', {})
                 for cat in CATEGORIES.keys():
                     if cat in saved_pages:
@@ -135,11 +131,16 @@ def get_page_url(base_url, page_num):
     """تعديل الرابط ليشمل رقم الصفحة"""
     if page_num <= 1:
         return base_url
-    # استبدال viewIndex أو إضافة page
-    if 'page=' in base_url:
-        return re.sub(r'page=\d+', f'page={page_num}', base_url)
-    else:
-        # إضافة معامل الصفحة
+    # استبدال viewIndex في الرابط
+    try:
+        # نحاول نستبدل viewIndex لو موجود
+        if 'viewIndex' in base_url:
+            url = re.sub(r'viewIndex%22%3A\d+', f'viewIndex%22%3A{(page_num-1)*24}', base_url)
+            return url
+        else:
+            separator = '&' if '?' in base_url else '?'
+            return f"{base_url}{separator}page={page_num}"
+    except:
         separator = '&' if '?' in base_url else '?'
         return f"{base_url}{separator}page={page_num}"
 
@@ -159,32 +160,32 @@ def create_session():
 def fetch_page(session, url, retries=3):
     for attempt in range(retries):
         try:
-            time.sleep(random.uniform(0.5, 1.5))  # تأخير عشوائي
+            time.sleep(random.uniform(0.5, 1.5))
             r = session.get(url, timeout=25)
             if r.status_code == 200:
                 return r.text
-            elif r.status_code == 503:
-                logger.warning(f"503 error, waiting... (attempt {attempt+1})")
-                time.sleep(3)
+            elif r.status_code in [503, 429]:
+                logger.warning(f"Rate limited (attempt {attempt+1}), waiting...")
+                time.sleep(5 + attempt * 2)
             else:
-                logger.warning(f"Status {r.status_code} for {url}")
+                logger.warning(f"Status {r.status_code}")
         except Exception as e:
-            logger.error(f"Fetch error (attempt {attempt+1}): {e}")
+            logger.error(f"Fetch error: {e}")
             time.sleep(2)
     return None
 
 def parse_item(item):
     try:
         # العنوان
-        title_elem = item.select_one('h2 a span') or item.select_one('h2 span') or item.select_one('[data-cy="title-recipe-title"]')
+        title_elem = item.select_one('h2 a span') or item.select_one('h2 span')
         if not title_elem:
             return None
         
         title = title_elem.text.strip()
-        if len(title) < 5:  # عنوان قصير جداً = غير صالح
+        if len(title) < 5:
             return None
         
-        # السعر الحالي
+        # السعر
         price_whole = item.select_one('.a-price-whole')
         price_fraction = item.select_one('.a-price-fraction')
         
@@ -201,8 +202,8 @@ def parse_item(item):
         if not price or price <= 0:
             return None
         
-        # السعر القديم (لحساب الخصم الحقيقي)
-        old_price_elem = item.select_one('.a-text-price .a-offscreen') or item.select_one('.a-price.a-text-price .a-offscreen')
+        # السعر القديم والخصم
+        old_price_elem = item.select_one('.a-text-price .a-offscreen')
         old_price = None
         discount = 0
         
@@ -214,18 +215,6 @@ def parse_item(item):
                     discount = int(((old_price - price) / old_price) * 100)
             except:
                 old_price = None
-        
-        # لو مفيش سعر قديم، ندور على نسبة خصم مكتوبة
-        if discount == 0:
-            discount_elem = item.select_one('.a-color-base') or item.select_one('[aria-label*="خصم"]')
-            if discount_elem:
-                discount_text = discount_elem.text
-                discount_match = re.search(r'(\d+)\s*%', discount_text) or re.search(r'(\d+)', discount_text)
-                if discount_match:
-                    try:
-                        discount = int(discount_match.group(1))
-                    except:
-                        discount = 0
         
         # اللينك
         link_elem = item.select_one('h2 a') or item.select_one('a[href*="/dp/"]')
@@ -249,21 +238,21 @@ def parse_item(item):
         
         # التقييم
         rating = 0
-        rating_elem = item.select_one('.a-icon-alt') or item.select_one('[aria-label*="نجوم"]') or item.select_one('[aria-label*="out of"]')
+        rating_elem = item.select_one('.a-icon-alt') or item.select_one('[aria-label*="نجوم"]')
         if rating_elem:
             rating_text = rating_elem.get('aria-label', '') or rating_elem.text
-            rating_match = re.search(r'(\d+[.,]?\d*)\s*(?:out of|من|نجوم?)', rating_text, re.IGNORECASE)
+            rating_match = re.search(r'(\d+[.,]?\d*)', rating_text.replace(',', '.'))
             if rating_match:
                 try:
-                    rating = float(rating_match.group(1).replace(',', '.'))
+                    rating = float(rating_match.group(1))
                 except:
                     rating = 0
         
-        # عدد المراجعات
+        # المراجعات
         reviews_count = 0
-        reviews_elem = item.select_one('a[href*="reviews"] span') or item.select_one('.a-size-base.a-color-secondary')
+        reviews_elem = item.select_one('a[href*="reviews"] span')
         if reviews_elem:
-            reviews_text = reviews_elem.text.replace(',', '').replace('(', '').replace(')', '').replace('مراجعة', '').replace('تقييم', '').strip()
+            reviews_text = reviews_elem.text.replace(',', '').replace('(', '').replace(')', '').strip()
             reviews_match = re.search(r'(\d+)', reviews_text)
             if reviews_match:
                 try:
@@ -272,27 +261,18 @@ def parse_item(item):
                     reviews_count = 0
         
         # الصورة
-        img_elem = item.select_one('img.s-image') or item.select_one('.s-image')
+        img_elem = item.select_one('img.s-image')
         image_url = ""
         if img_elem:
             image_url = img_elem.get('data-src') or img_elem.get('src', '')
             if image_url and '._' in image_url:
                 image_url = re.sub(r'\._[^_]+_\.', '._SL1000_.', image_url)
         
-        # الشحن المجاني
+        # الشحن والPrime
         free_shipping = bool(item.select_one('[aria-label*="شحن مجاني"]') or 
-                           item.select_one('.a-color-success') or
-                           item.select_one('i.a-icon-prime') or
                            'FREE' in item.get_text().upper())
-        
-        # Prime
         is_prime = bool(item.select_one('.a-icon-prime') or 
-                     item.select_one('[aria-label*="Prime"]') or
-                     'prime' in item.get_text().lower())
-        
-        # القسم (Category)
-        category_elem = item.select_one('[data-component-type="s-search-result"]')
-        category = "متنوع"
+                       'prime' in item.get_text().lower())
         
         return {
             'title': title,
@@ -306,7 +286,6 @@ def parse_item(item):
             'image_url': image_url,
             'free_shipping': free_shipping,
             'is_prime': is_prime,
-            'category': category,
             'id': hashlib.md5((title + str(asin)).encode()).hexdigest()
         }
         
@@ -314,75 +293,85 @@ def parse_item(item):
         logger.error(f"Parse error: {e}")
         return None
 
-def search_category(session, category_name, base_url, start_page, num_pages):
-    """البحث في قسم معين من صفحة محددة"""
-    deals = []
+def search_until_target(session, category_name, base_url, start_page):
+    """
+    يدور في القسم لحد ما يلاقي منتجات أو يوصل لحد الصفحات
+    """
+    global last_page_tracker
     
-    for page_offset in range(num_pages):
-        current_page = start_page + page_offset
+    category_deals = []
+    current_page = start_page
+    
+    while len(category_deals) < 3 and current_page < start_page + MAX_PAGES_PER_CATEGORY:
         url = get_page_url(base_url, current_page)
-        
-        logger.info(f"🔍 Searching {category_name} - Page {current_page}")
+        logger.info(f"🔍 [{category_name}] Page {current_page} | Found: {len(category_deals)}")
         
         html = fetch_page(session, url)
         if not html:
+            current_page += 1
             continue
         
         soup = BeautifulSoup(html, 'html.parser')
         items = soup.find_all('div', {'data-component-type': 's-search-result'})
         
         if not items:
-            logger.warning(f"No items found in {category_name} page {current_page}")
+            logger.warning(f"No items in {category_name} page {current_page}")
+            current_page += 1
             continue
         
         for item in items:
             deal = parse_item(item)
             if deal and deal['discount'] >= MIN_DISCOUNT and deal['rating'] >= MIN_RATING:
                 if deal['id'] not in sent_products and not is_similar_product(deal['title']):
-                    deal['category'] = category_name  # إضافة اسم القسم
-                    deals.append(deal)
+                    deal['category'] = category_name
+                    category_deals.append(deal)
+                    
+                    # لو وصلنا للهدف، نوقف
+                    if len(category_deals) >= 5:
+                        break
         
-        # تحديث آخر صفحة تم البحث فيها
         last_page_tracker[category_name] = current_page
-        
-        time.sleep(random.uniform(1, 2))  # تأخير بين الصفحات
+        current_page += 1
+        time.sleep(random.uniform(0.8, 1.5))
     
-    return deals
+    return category_deals
 
 def search_all_deals():
-    """البحث في كل الأقسام مع دورة الصفحات"""
+    """
+    يدور في كل الأقسام لحد ما يجمع 20 منتج
+    """
     global last_page_tracker
     
     all_deals = []
     session = create_session()
     
-    # خلط الأقسام عشوياً عشان التنوع
+    # خلط الأقسام عشوائياً
     categories_list = list(CATEGORIES.items())
     random.shuffle(categories_list)
     
-    logger.info(f"🚀 Starting search in {len(categories_list)} categories")
-    logger.info(f"📄 Pages per session: {PAGES_PER_SESSION}")
+    logger.info(f"🚀 Target: {TARGET_DEALS_COUNT} deals | Searching {len(categories_list)} categories")
     
     for category_name, base_url in categories_list:
-        if len(all_deals) >= TARGET_DEALS_COUNT * 2:  # نجمع أكتر شوية للفلترة
+        if len(all_deals) >= TARGET_DEALS_COUNT:
             break
         
         # نبدأ من آخر صفحة + 1
         start_page = last_page_tracker.get(category_name, 0) + 1
         
         # لو وصلنا لصفحة كبيرة، نرجع للبداية
-        if start_page > 20:
+        if start_page > 50:
             start_page = 1
             last_page_tracker[category_name] = 0
         
-        deals = search_category(session, category_name, base_url, start_page, PAGES_PER_SESSION)
+        deals = search_until_target(session, category_name, base_url, start_page)
         all_deals.extend(deals)
         
-        logger.info(f"✅ {category_name}: {len(deals)} deals (Total: {len(all_deals)})")
+        logger.info(f"✅ {category_name}: +{len(deals)} | Total: {len(all_deals)}/{TARGET_DEALS_COUNT}")
         
-        time.sleep(random.uniform(2, 3))  # تأخير بين الأقسام
+        # تأخير بين الأقسام
+        time.sleep(random.uniform(1, 2))
     
-    # ترتيب حسب الخصم (الأعلى أولاً) وأخذ الأفضل
+    # ترتيب حسب الخصم
     all_deals.sort(key=lambda x: (x['discount'], x['rating']), reverse=True)
     
     # إزالة التكرارات
@@ -398,58 +387,65 @@ def search_all_deals():
         if len(unique_deals) >= TARGET_DEALS_COUNT:
             break
     
-    logger.info(f"🎯 Found {len(unique_deals)} unique deals")
+    # حفظ مكان البحث
+    save_database()
+    
+    logger.info(f"🎯 Final: {len(unique_deals)} unique deals")
     return unique_deals
 
 # ================== إرسال ==================
 def send_deals(deals, chat_id):
     if not deals:
+        updater.bot.send_message(
+            chat_id=chat_id,
+            text="❌ *مفيش عروض كافية دلوقتي*\nجرب تاني بعد شوية!",
+            parse_mode='Markdown'
+        )
         return
     
-    # إرسال ملخص أولاً
-    summary = f"🔥 *لقيت {len(deals)} عرض قوي!*\n\n"
-    summary += "📊 *الأقسام:*\n"
-    
-    categories_count = {}
+    # ملخص
+    categories = {}
     for d in deals:
         cat = d.get('category', 'متنوع')
-        categories_count[cat] = categories_count.get(cat, 0) + 1
+        categories[cat] = categories.get(cat, 0) + 1
     
-    for cat, count in sorted(categories_count.items(), key=lambda x: x[1], reverse=True)[:5]:
-        summary += f"• {cat}: {count} منتجات\n"
+    summary = f"🔥 *لقيت {len(deals)} عرض رهيب!*\n\n"
+    summary += "📊 *الأقسام:*\n"
+    for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
+        summary += f"• {cat}: {count} 🛍️\n"
     
     try:
         updater.bot.send_message(chat_id=chat_id, text=summary, parse_mode='Markdown')
     except Exception as e:
-        logger.error(f"Summary send error: {e}")
+        logger.error(f"Summary error: {e}")
     
     time.sleep(1)
     
-    # إرسال كل منتج
+    # إرسال المنتجات
     for idx, d in enumerate(deals, 1):
         if d['id'] in sent_products:
             continue
         
         old_price_text = f"~~{d['old_price']:.0f}~~ " if d['old_price'] else ""
         
-        shipping_text = "🚚 مجاني" if d['free_shipping'] else ""
-        prime_text = "✅ Prime" if d['is_prime'] else ""
+        shipping = "🚚 مجاني" if d['free_shipping'] else ""
+        prime = "✅ Prime" if d['is_prime'] else ""
         
-        # اختيار إيموجي حسب الخصم
+        # إيموجي حسب الخصم
         if d['discount'] >= 70:
-            fire_emoji = "🔥🔥🔥"
+            fire = "🔥🔥🔥"
         elif d['discount'] >= 60:
-            fire_emoji = "🔥🔥"
+            fire = "🔥🔥"
         else:
-            fire_emoji = "🔥"
+            fire = "🔥"
         
-        msg = f"""{fire_emoji} *{d['title'][:70]}...*
+        msg = f"""{fire} *{d['title'][:65]}...*
 
 💰 *{d['price']:.0f}* ريال {old_price_text}
 📉 خصم: *{d['discount']}%*
 ⭐ تقييم: *{d['rating']:.1f}/5* ({d['reviews_count']})
-🏷️ القسم: {d.get('category', 'متنوع')}
-{shipping_text} {prime_text}
+🏷️ {d.get('category', 'متنوع')}
+{shipping} {prime}
 
 🔗 [اشتري الآن]({d['link']})
 """
@@ -463,127 +459,87 @@ def send_deals(deals, chat_id):
                     parse_mode='Markdown'
                 )
             else:
-                updater.bot.send_message(
-                    chat_id=chat_id,
-                    text=msg,
-                    parse_mode='Markdown'
-                )
+                updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
             
             sent_products.add(d['id'])
             sent_hashes.add(create_title_hash(d['title']))
             
-            # تسجيل الإحصائيات
-            logger.info(f"✅ [{idx}/{len(deals)}] Sent: {d['title'][:40]} | {d['discount']}% off")
+            logger.info(f"✅ [{idx}/{len(deals)}] {d['title'][:40]} | {d['discount']}%")
             
         except Exception as e:
-            logger.error(f"Send error for {d['title'][:30]}: {e}")
+            logger.error(f"Send error: {e}")
             try:
                 updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
             except:
                 pass
         
-        time.sleep(1.5)  # تأخير أطول لتجنب الحظر
+        time.sleep(1.5)
     
     save_database()
 
 # ================== أوامر ==================
 def start_cmd(update: Update, context: CallbackContext):
-    welcome_msg = """👋 *أهلا بيك في بوت عروض أمازون السعودية المتقدم!*
+    welcome = """👋 *أهلا بيك في بوت عروض أمازون!*
 
 🔥 *المميزات:*
-• بحث في *20 قسم* مختلف
-• دورة صفحات ذكية (كل مرة صفحات جديدة)
-• خصومات *50%+* فقط
-• تقييم *3+ نجوم*
-• صور + لينكات مباشرة
+• يدور في *كل الأقسام* لحد ما يلاقي 20 عرض
+• خصم *50%+* | تقييم *3+ نجوم*
+• كل مرة صفحات جديدة - مافيش تكرار!
 
-📝 *طريقة الاستخدام:*
-اكتب *Hi* - يبدأ البحث في كل الأقسام
-
-⚡️ كل مرة هيجيبلك عروض من صفحات مختلفة!"""
-    
-    update.message.reply_text(welcome_msg, parse_mode='Markdown')
+📝 اكتب *Hi* عشان تبدأ البحث"""
+    update.message.reply_text(welcome, parse_mode='Markdown')
 
 def hi_cmd(update: Update, context: CallbackContext):
     global is_scanning
 
     if is_scanning:
-        update.message.reply_text("⏳ البوت شغال في بحث تاني... استنى شوية!")
+        update.message.reply_text("⏳ البوت شغال... استنى!")
         return
 
     is_scanning = True
     
-    # إظهار حالة البحث
     status_msg = update.message.reply_text(
-        "🔍 *بدورلك في كل الأقسام...*\n"
-        "📄 كل مرة ببحث في صفحات مختلفة\n"
-        "⏳ ممكن ياخد دقيقة...",
+        "🔍 *بدور في كل الأقسام...*\n"
+        "⏳ ممكن ياخد دقيقة - بدور لحد ما لاقي 20 عرض!",
         parse_mode='Markdown'
     )
 
     try:
         deals = search_all_deals()
         
-        if deals:
-            # حذف رسالة الانتظار
-            try:
-                updater.bot.delete_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=status_msg.message_id
-                )
-            except:
-                pass
-            
-            send_deals(deals, update.effective_chat.id)
-        else:
-            update.message.reply_text(
-                "❌ *مفيش عروض كافية دلوقتي*\n"
-                "🔄 جرب تاني بعد شوية - الصفحات بتتغير كل مرة!",
-                parse_mode='Markdown'
+        try:
+            updater.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id
             )
-            
+        except:
+            pass
+        
+        send_deals(deals, update.effective_chat.id)
+        
     except Exception as e:
-        logger.error(f"Error in hi_cmd: {e}")
-        update.message.reply_text(
-            "❌ *حصل خطأ في البحث*\n"
-            "🔄 جرب تاني - لو استمر الخطأ، كلم المطور",
-            parse_mode='Markdown'
-        )
+        logger.error(f"Error: {e}")
+        update.message.reply_text("❌ حصل خطأ - جرب تاني!", parse_mode='Markdown')
     finally:
         is_scanning = False
 
 def status_cmd(update: Update, context: CallbackContext):
-    total_sent = len(sent_products)
-    categories_status = "\n".join([
-        f"• {cat}: صفحة {page}" 
-        for cat, page in sorted(last_page_tracker.items())[:10]
-    ])
+    total = len(sent_products)
+    cats = "\n".join([f"• {c}: p{last_page_tracker[c]}" for c in list(CATEGORIES.keys())[:5]])
     
-    status_msg = f"""✅ *البوت شغال تمام!*
+    msg = f"""✅ *البوت شغال!*
 
-📊 *الإحصائيات:*
-• منتجات متبعتة: *{total_sent}*
-• أقسام نشطة: *{len(CATEGORIES)}*
-• صفحات/بحث: *{PAGES_PER_SESSION}*
+📦 منتجات متبعتة: *{total}*
+🔄 الصفحات بتتغير كل مرة
 
-🗂️ *آخر صفحات تم البحث فيها:*
-{categories_status}
+{cats}
 
-🔄 اكتب *Hi* عشان تبدأ بحث جديد!"""
-    
-    update.message.reply_text(status_msg, parse_mode='Markdown')
-
-def reset_cmd(update: Update, context: CallbackContext):
-    """أمر لإعادة تعيين الصفحات (للأدمن فقط)"""
-    global last_page_tracker
-    last_page_tracker = {cat: 0 for cat in CATEGORIES.keys()}
-    save_database()
-    update.message.reply_text("✅ تم إعادة تعيين الصفحات - البحث هيبدأ من الأول!")
+اكتب *Hi* عشان تبدأ!"""
+    update.message.reply_text(msg, parse_mode='Markdown')
 
 # ================== تشغيل ==================
 def start_bot():
     global updater
-
     load_database()
 
     updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
@@ -591,19 +547,14 @@ def start_bot():
 
     dp.add_handler(CommandHandler("start", start_cmd))
     dp.add_handler(CommandHandler("status", status_cmd))
-    dp.add_handler(CommandHandler("reset", reset_cmd))
     dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$') & Filters.text, hi_cmd))
 
-    logger.info("🤖 Bot started with advanced page rotation!")
-    logger.info(f"📁 Categories: {len(CATEGORIES)}")
-    logger.info(f"📄 Pages per search: {PAGES_PER_SESSION}")
-    
+    logger.info(f"🤖 Bot ready! Target: {TARGET_DEALS_COUNT} deals")
     updater.start_polling(drop_pending_updates=True, timeout=30)
     updater.idle()
 
 def main():
     threading.Thread(target=run_health_server, daemon=True).start()
-
     while True:
         try:
             start_bot()
