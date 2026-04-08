@@ -25,8 +25,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
-
-# ✅ مهم: استخدم PORT اللي Render بيديه
 PORT = int(os.environ.get("PORT", 10000))
 
 ua = UserAgent()
@@ -57,7 +55,7 @@ CATEGORIES = {
 
 last_page_tracker = {cat: 0 for cat in CATEGORIES.keys()}
 
-# ================== Health Server (على PORT الرئيسي) ==================
+# ================== Health Server ==================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -66,18 +64,16 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'OK - Bot is running')
 
     def log_message(self, format, *args):
-        # ✅ مهم: سجل الـ Health Check عشان تعرف إنه شغال
         logger.info(f"Health check: {format % args}")
 
 def run_health_server():
-    """شغل الـ Health Server على نفس PORT اللي Render بيديه"""
     while True:
         try:
             server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
-            logger.info(f"🌐 Health server running on port {PORT}")
+            logger.info(f"🌐 Health server on port {PORT}")
             server.serve_forever()
         except Exception as e:
-            logger.error(f"Health server error: {e}")
+            logger.error(f"Health error: {e}")
             time.sleep(3)
 
 # ================== Database ==================
@@ -93,7 +89,7 @@ def load_database():
                 for cat in CATEGORIES.keys():
                     if cat in saved_pages:
                         last_page_tracker[cat] = saved_pages[cat]
-            logger.info(f"📦 Loaded {len(sent_products)} products from database")
+            logger.info(f"📦 Loaded {len(sent_products)} products")
     except Exception as e:
         logger.error(f"DB Load Error: {e}")
 
@@ -245,15 +241,10 @@ def parse_item(item):
                 except:
                     reviews_count = 0
         
-        img_elem = item.select_one('img.s-image')
-        image_url = ""
-        if img_elem:
-            image_url = img_elem.get('data-src') or img_elem.get('src', '')
-            if image_url and '._' in image_url:
-                image_url = re.sub(r'\._[^_]+_\.', '._SL1000_.', image_url)
-        
         free_shipping = bool(item.select_one('[aria-label*="شحن مجاني"]') or 'FREE' in item.get_text().upper())
         is_prime = bool(item.select_one('.a-icon-prime') or 'prime' in item.get_text().lower())
+        
+        # ❌ تم إزالة استخراج الصورة
         
         return {
             'title': title,
@@ -264,7 +255,6 @@ def parse_item(item):
             'asin': asin,
             'rating': round(rating, 1),
             'reviews_count': reviews_count,
-            'image_url': image_url,
             'free_shipping': free_shipping,
             'is_prime': is_prime,
             'id': hashlib.md5((title + str(asin)).encode()).hexdigest()
@@ -357,7 +347,7 @@ def search_all_deals():
     logger.info(f"🎯 Final: {len(unique_deals)} deals")
     return unique_deals
 
-# ================== إرسال ==================
+# ================== إرسال (بدون صور) ==================
 def send_deals(deals, chat_id):
     if not deals:
         updater.bot.send_message(
@@ -398,7 +388,7 @@ def send_deals(deals, chat_id):
         else:
             fire = "🔥"
         
-        msg = f"""{fire} *{d['title'][:65]}...*
+        msg = f"""{fire} *{d['title'][:70]}...*
 
 💰 *{d['price']:.0f}* ريال {old_price_text}
 📉 خصم: *{d['discount']}%*
@@ -410,15 +400,13 @@ def send_deals(deals, chat_id):
 """
         
         try:
-            if d['image_url']:
-                updater.bot.send_photo(
-                    chat_id=chat_id,
-                    photo=d['image_url'],
-                    caption=msg,
-                    parse_mode='Markdown'
-                )
-            else:
-                updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+            # ❌ إرسال نص فقط - بدون صور
+            updater.bot.send_message(
+                chat_id=chat_id, 
+                text=msg, 
+                parse_mode='Markdown',
+                disable_web_page_preview=False
+            )
             
             sent_products.add(d['id'])
             sent_hashes.add(create_title_hash(d['title']))
@@ -426,12 +414,8 @@ def send_deals(deals, chat_id):
             
         except Exception as e:
             logger.error(f"Send error: {e}")
-            try:
-                updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
-            except:
-                pass
         
-        time.sleep(1.5)
+        time.sleep(1)
     
     save_database()
 
@@ -505,11 +489,8 @@ def start_bot():
     updater.idle()
 
 def main():
-    # ✅ شغل Health Server في Thread منفصل
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
-    
-    # ✅ تأكد إن الـ Health Server اشتغل
     time.sleep(2)
     
     while True:
