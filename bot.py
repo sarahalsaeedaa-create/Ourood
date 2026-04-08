@@ -25,6 +25,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
+
+# ✅ مهم: استخدم PORT اللي Render بيديه
 PORT = int(os.environ.get("PORT", 10000))
 
 ua = UserAgent()
@@ -34,12 +36,11 @@ is_scanning = False
 updater = None
 
 # ============ إعدادات البحث ============
-TARGET_DEALS_COUNT = 20  # الهدف: 20 منتج
-MIN_DISCOUNT = 50        # خصم 50%+
-MIN_RATING = 3.0         # تقييم 3+ نجوم
-MAX_PAGES_PER_CATEGORY = 20  # أقصى صفحات للقسم الواحد
+TARGET_DEALS_COUNT = 20
+MIN_DISCOUNT = 50
+MIN_RATING = 3.0
+MAX_PAGES_PER_CATEGORY = 20
 
-# الأقسام للبحث
 CATEGORIES = {
     'electronics': 'https://www.amazon.sa/s?k=electronics&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'fashion': 'https://www.amazon.sa/s?k=fashion&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
@@ -50,39 +51,33 @@ CATEGORIES = {
     'kitchen': 'https://www.amazon.sa/s?k=kitchen&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'phones': 'https://www.amazon.sa/s?k=smartphones&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'laptops': 'https://www.amazon.sa/s?k=laptops&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'grocery': 'https://www.amazon.sa/s?k=grocery&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'automotive': 'https://www.amazon.sa/s?k=automotive&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'baby': 'https://www.amazon.sa/s?k=baby&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'tools': 'https://www.amazon.sa/s?k=tools&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'health': 'https://www.amazon.sa/s?k=health&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'gaming': 'https://www.amazon.sa/s?k=gaming&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
     'watches': 'https://www.amazon.sa/s?k=watches&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
-    'furniture': 'https://www.amazon.sa/s?k=furniture&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D&s=price-asc-rank',
 }
 
-# متغير لتتبع آخر صفحة لكل قسم
 last_page_tracker = {cat: 0 for cat in CATEGORIES.keys()}
 
-# ================== Health Server ==================
+# ================== Health Server (على PORT الرئيسي) ==================
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b'OK')
+        self.wfile.write(b'OK - Bot is running')
 
     def log_message(self, format, *args):
-        return
+        # ✅ مهم: سجل الـ Health Check عشان تعرف إنه شغال
+        logger.info(f"Health check: {format % args}")
 
 def run_health_server():
-    health_port = 8080
+    """شغل الـ Health Server على نفس PORT اللي Render بيديه"""
     while True:
         try:
-            server = HTTPServer(('0.0.0.0', health_port), HealthHandler)
-            logger.info(f"🌐 Health server running on {health_port}")
+            server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
+            logger.info(f"🌐 Health server running on port {PORT}")
             server.serve_forever()
         except Exception as e:
-            logger.error(f"Health crash: {e}")
+            logger.error(f"Health server error: {e}")
             time.sleep(3)
 
 # ================== Database ==================
@@ -98,6 +93,7 @@ def load_database():
                 for cat in CATEGORIES.keys():
                     if cat in saved_pages:
                         last_page_tracker[cat] = saved_pages[cat]
+            logger.info(f"📦 Loaded {len(sent_products)} products from database")
     except Exception as e:
         logger.error(f"DB Load Error: {e}")
 
@@ -128,12 +124,9 @@ def is_similar_product(title):
     return h in sent_hashes
 
 def get_page_url(base_url, page_num):
-    """تعديل الرابط ليشمل رقم الصفحة"""
     if page_num <= 1:
         return base_url
-    # استبدال viewIndex في الرابط
     try:
-        # نحاول نستبدل viewIndex لو موجود
         if 'viewIndex' in base_url:
             url = re.sub(r'viewIndex%22%3A\d+', f'viewIndex%22%3A{(page_num-1)*24}', base_url)
             return url
@@ -165,10 +158,8 @@ def fetch_page(session, url, retries=3):
             if r.status_code == 200:
                 return r.text
             elif r.status_code in [503, 429]:
-                logger.warning(f"Rate limited (attempt {attempt+1}), waiting...")
+                logger.warning(f"Rate limited, waiting...")
                 time.sleep(5 + attempt * 2)
-            else:
-                logger.warning(f"Status {r.status_code}")
         except Exception as e:
             logger.error(f"Fetch error: {e}")
             time.sleep(2)
@@ -176,7 +167,6 @@ def fetch_page(session, url, retries=3):
 
 def parse_item(item):
     try:
-        # العنوان
         title_elem = item.select_one('h2 a span') or item.select_one('h2 span')
         if not title_elem:
             return None
@@ -185,7 +175,6 @@ def parse_item(item):
         if len(title) < 5:
             return None
         
-        # السعر
         price_whole = item.select_one('.a-price-whole')
         price_fraction = item.select_one('.a-price-fraction')
         
@@ -202,7 +191,6 @@ def parse_item(item):
         if not price or price <= 0:
             return None
         
-        # السعر القديم والخصم
         old_price_elem = item.select_one('.a-text-price .a-offscreen')
         old_price = None
         discount = 0
@@ -216,7 +204,6 @@ def parse_item(item):
             except:
                 old_price = None
         
-        # اللينك
         link_elem = item.select_one('h2 a') or item.select_one('a[href*="/dp/"]')
         relative_link = link_elem.get('href') if link_elem else None
         
@@ -236,7 +223,6 @@ def parse_item(item):
             else:
                 clean_link = full_link.split('?')[0] if '?' in full_link else full_link
         
-        # التقييم
         rating = 0
         rating_elem = item.select_one('.a-icon-alt') or item.select_one('[aria-label*="نجوم"]')
         if rating_elem:
@@ -248,7 +234,6 @@ def parse_item(item):
                 except:
                     rating = 0
         
-        # المراجعات
         reviews_count = 0
         reviews_elem = item.select_one('a[href*="reviews"] span')
         if reviews_elem:
@@ -260,7 +245,6 @@ def parse_item(item):
                 except:
                     reviews_count = 0
         
-        # الصورة
         img_elem = item.select_one('img.s-image')
         image_url = ""
         if img_elem:
@@ -268,11 +252,8 @@ def parse_item(item):
             if image_url and '._' in image_url:
                 image_url = re.sub(r'\._[^_]+_\.', '._SL1000_.', image_url)
         
-        # الشحن والPrime
-        free_shipping = bool(item.select_one('[aria-label*="شحن مجاني"]') or 
-                           'FREE' in item.get_text().upper())
-        is_prime = bool(item.select_one('.a-icon-prime') or 
-                       'prime' in item.get_text().lower())
+        free_shipping = bool(item.select_one('[aria-label*="شحن مجاني"]') or 'FREE' in item.get_text().upper())
+        is_prime = bool(item.select_one('.a-icon-prime') or 'prime' in item.get_text().lower())
         
         return {
             'title': title,
@@ -294,9 +275,6 @@ def parse_item(item):
         return None
 
 def search_until_target(session, category_name, base_url, start_page):
-    """
-    يدور في القسم لحد ما يلاقي منتجات أو يوصل لحد الصفحات
-    """
     global last_page_tracker
     
     category_deals = []
@@ -315,7 +293,6 @@ def search_until_target(session, category_name, base_url, start_page):
         items = soup.find_all('div', {'data-component-type': 's-search-result'})
         
         if not items:
-            logger.warning(f"No items in {category_name} page {current_page}")
             current_page += 1
             continue
         
@@ -326,7 +303,6 @@ def search_until_target(session, category_name, base_url, start_page):
                     deal['category'] = category_name
                     category_deals.append(deal)
                     
-                    # لو وصلنا للهدف، نوقف
                     if len(category_deals) >= 5:
                         break
         
@@ -337,28 +313,22 @@ def search_until_target(session, category_name, base_url, start_page):
     return category_deals
 
 def search_all_deals():
-    """
-    يدور في كل الأقسام لحد ما يجمع 20 منتج
-    """
     global last_page_tracker
     
     all_deals = []
     session = create_session()
     
-    # خلط الأقسام عشوائياً
     categories_list = list(CATEGORIES.items())
     random.shuffle(categories_list)
     
-    logger.info(f"🚀 Target: {TARGET_DEALS_COUNT} deals | Searching {len(categories_list)} categories")
+    logger.info(f"🚀 Target: {TARGET_DEALS_COUNT} deals")
     
     for category_name, base_url in categories_list:
         if len(all_deals) >= TARGET_DEALS_COUNT:
             break
         
-        # نبدأ من آخر صفحة + 1
         start_page = last_page_tracker.get(category_name, 0) + 1
         
-        # لو وصلنا لصفحة كبيرة، نرجع للبداية
         if start_page > 50:
             start_page = 1
             last_page_tracker[category_name] = 0
@@ -366,15 +336,11 @@ def search_all_deals():
         deals = search_until_target(session, category_name, base_url, start_page)
         all_deals.extend(deals)
         
-        logger.info(f"✅ {category_name}: +{len(deals)} | Total: {len(all_deals)}/{TARGET_DEALS_COUNT}")
-        
-        # تأخير بين الأقسام
+        logger.info(f"✅ {category_name}: +{len(deals)} | Total: {len(all_deals)}")
         time.sleep(random.uniform(1, 2))
     
-    # ترتيب حسب الخصم
     all_deals.sort(key=lambda x: (x['discount'], x['rating']), reverse=True)
     
-    # إزالة التكرارات
     unique_deals = []
     seen_asins = set()
     for deal in all_deals:
@@ -387,10 +353,8 @@ def search_all_deals():
         if len(unique_deals) >= TARGET_DEALS_COUNT:
             break
     
-    # حفظ مكان البحث
     save_database()
-    
-    logger.info(f"🎯 Final: {len(unique_deals)} unique deals")
+    logger.info(f"🎯 Final: {len(unique_deals)} deals")
     return unique_deals
 
 # ================== إرسال ==================
@@ -398,19 +362,17 @@ def send_deals(deals, chat_id):
     if not deals:
         updater.bot.send_message(
             chat_id=chat_id,
-            text="❌ *مفيش عروض كافية دلوقتي*\nجرب تاني بعد شوية!",
+            text="❌ مفيش عروض كافية دلوقتي",
             parse_mode='Markdown'
         )
         return
     
-    # ملخص
     categories = {}
     for d in deals:
         cat = d.get('category', 'متنوع')
         categories[cat] = categories.get(cat, 0) + 1
     
-    summary = f"🔥 *لقيت {len(deals)} عرض رهيب!*\n\n"
-    summary += "📊 *الأقسام:*\n"
+    summary = f"🔥 *لقيت {len(deals)} عرض!*\n\n"
     for cat, count in sorted(categories.items(), key=lambda x: x[1], reverse=True):
         summary += f"• {cat}: {count} 🛍️\n"
     
@@ -421,17 +383,14 @@ def send_deals(deals, chat_id):
     
     time.sleep(1)
     
-    # إرسال المنتجات
     for idx, d in enumerate(deals, 1):
         if d['id'] in sent_products:
             continue
         
         old_price_text = f"~~{d['old_price']:.0f}~~ " if d['old_price'] else ""
-        
         shipping = "🚚 مجاني" if d['free_shipping'] else ""
         prime = "✅ Prime" if d['is_prime'] else ""
         
-        # إيموجي حسب الخصم
         if d['discount'] >= 70:
             fire = "🔥🔥🔥"
         elif d['discount'] >= 60:
@@ -463,8 +422,7 @@ def send_deals(deals, chat_id):
             
             sent_products.add(d['id'])
             sent_hashes.add(create_title_hash(d['title']))
-            
-            logger.info(f"✅ [{idx}/{len(deals)}] {d['title'][:40]} | {d['discount']}%")
+            logger.info(f"✅ [{idx}] {d['title'][:40]}")
             
         except Exception as e:
             logger.error(f"Send error: {e}")
@@ -481,12 +439,10 @@ def send_deals(deals, chat_id):
 def start_cmd(update: Update, context: CallbackContext):
     welcome = """👋 *أهلا بيك في بوت عروض أمازون!*
 
-🔥 *المميزات:*
-• يدور في *كل الأقسام* لحد ما يلاقي 20 عرض
-• خصم *50%+* | تقييم *3+ نجوم*
-• كل مرة صفحات جديدة - مافيش تكرار!
+🔥 يدور في كل الأقسام لحد ما يلاقي 20 عرض
+🔄 كل مرة صفحات جديدة
 
-📝 اكتب *Hi* عشان تبدأ البحث"""
+اكتب *Hi* عشان تبدأ"""
     update.message.reply_text(welcome, parse_mode='Markdown')
 
 def hi_cmd(update: Update, context: CallbackContext):
@@ -499,8 +455,7 @@ def hi_cmd(update: Update, context: CallbackContext):
     is_scanning = True
     
     status_msg = update.message.reply_text(
-        "🔍 *بدور في كل الأقسام...*\n"
-        "⏳ ممكن ياخد دقيقة - بدور لحد ما لاقي 20 عرض!",
+        "🔍 بدور في كل الأقسام...\n⏳ ممكن ياخد دقيقة",
         parse_mode='Markdown'
     )
 
@@ -525,14 +480,10 @@ def hi_cmd(update: Update, context: CallbackContext):
 
 def status_cmd(update: Update, context: CallbackContext):
     total = len(sent_products)
-    cats = "\n".join([f"• {c}: p{last_page_tracker[c]}" for c in list(CATEGORIES.keys())[:5]])
-    
     msg = f"""✅ *البوت شغال!*
 
-📦 منتجات متبعتة: *{total}*
+📦 منتجات: *{total}*
 🔄 الصفحات بتتغير كل مرة
-
-{cats}
 
 اكتب *Hi* عشان تبدأ!"""
     update.message.reply_text(msg, parse_mode='Markdown')
@@ -549,12 +500,18 @@ def start_bot():
     dp.add_handler(CommandHandler("status", status_cmd))
     dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$') & Filters.text, hi_cmd))
 
-    logger.info(f"🤖 Bot ready! Target: {TARGET_DEALS_COUNT} deals")
+    logger.info("🤖 Bot started!")
     updater.start_polling(drop_pending_updates=True, timeout=30)
     updater.idle()
 
 def main():
-    threading.Thread(target=run_health_server, daemon=True).start()
+    # ✅ شغل Health Server في Thread منفصل
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+    
+    # ✅ تأكد إن الـ Health Server اشتغل
+    time.sleep(2)
+    
     while True:
         try:
             start_bot()
