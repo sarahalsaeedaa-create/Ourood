@@ -34,8 +34,8 @@ updater = None
 # ============ إعدادات البحث ============
 TARGET_DEALS_COUNT = 20
 MIN_DISCOUNT = 40        # ✅ خصم 40%+
-MIN_RATING = 3.0         # ✅ 3 نجوم+
-MAX_PAGES_PER_CATEGORY = 15
+MIN_RATING = 3.0
+MAX_PAGES_PER_CATEGORY = 20
 
 CATEGORIES = {
     'deals': 'https://www.amazon.sa/gp/goldbox',
@@ -50,6 +50,9 @@ CATEGORIES = {
     'beauty': 'https://www.amazon.sa/s?k=beauty&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D',
     'watches': 'https://www.amazon.sa/s?k=watches&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D',
     'automotive': 'https://www.amazon.sa/s?k=automotive&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D',
+    'laptops': 'https://www.amazon.sa/s?k=laptop&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D',
+    'headphones': 'https://www.amazon.sa/s?k=headphones&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D',
+    'shoes': 'https://www.amazon.sa/s?k=shoes&deals-widget=%257B%2522version%2522%253A1%252C%2522viewIndex%2522%253A0%252C%2522presetId%2522%253A%2522deals-collection-all-deals%2522%257D',
 }
 
 last_page_tracker = {cat: 0 for cat in CATEGORIES.keys()}
@@ -136,7 +139,6 @@ def create_session():
         'User-Agent': random.choice([
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
         ]),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8',
@@ -201,7 +203,7 @@ def parse_item(item):
         if not price or price < 1:
             return None
         
-        # السعر القديم والخصم
+        # السعر القديم والخصم الحقيقي
         old_price = None
         discount = 0
         
@@ -217,10 +219,16 @@ def parse_item(item):
                 except:
                     pass
         
-        # لو مفيش خصم، نقدر
+        # ✅ لو مفيش خصم محسوب، ندور على نسبة مكتوبة في الصفحة
         if discount == 0:
-            discount = random.randint(40, 70)
-            old_price = price * (1 + discount/100)
+            full_text = item.get_text()
+            discount_match = re.search(r'(\d+)%', full_text)
+            if discount_match:
+                discount = int(discount_match.group(1))
+        
+        # ✅ شرط الخصم 40%+
+        if discount < 40:
+            return None
         
         # اللينك
         link = ""
@@ -247,10 +255,14 @@ def parse_item(item):
             if match:
                 rating = float(match.group(1))
         
+        # ✅ شرط التقييم 3+
+        if rating < 3.0:
+            return None
+        
         return {
             'title': title[:100],
             'price': price,
-            'old_price': round(old_price, 2) if old_price else round(price * 1.4, 2),
+            'old_price': round(old_price, 2) if old_price else round(price * 100 / (100 - discount), 2),
             'discount': discount,
             'link': link if link else f"https://www.amazon.sa/s?k={title[:20].replace(' ', '+')}",
             'asin': asin,
@@ -266,8 +278,10 @@ def search_category(session, category_name, base_url, start_page):
     
     deals = []
     
-    # نبحث لحد ما نلاقي 2 منتج أو نوصل لـ 5 صفحات
-    for page_offset in range(5):
+    for page_offset in range(MAX_PAGES_PER_CATEGORY):
+        if len(deals) >= 3:
+            break
+            
         page_num = start_page + page_offset
         url = get_page_url(base_url, page_num)
         
@@ -284,18 +298,18 @@ def search_category(session, category_name, base_url, start_page):
         
         for item in items:
             deal = parse_item(item)
-            if deal and deal['discount'] >= MIN_DISCOUNT and deal['rating'] >= MIN_RATING:
+            if deal:
                 if deal['id'] not in sent_products:
                     deal['category'] = category_name
                     deals.append(deal)
                     logger.info(f"✅ ADDED: {deal['title'][:40]} | {deal['discount']}%")
                     
-                    if len(deals) >= 2:
+                    if len(deals) >= 3:
                         break
         
         last_page_tracker[category_name] = page_num
         
-        if len(deals) >= 2:
+        if len(deals) >= 3:
             break
         
         time.sleep(2)
@@ -311,14 +325,14 @@ def search_all_deals():
     cats = list(CATEGORIES.items())
     random.shuffle(cats)
     
-    logger.info(f"🚀 Searching {len(cats)} categories...")
+    logger.info(f"🚀 Searching {len(cats)} categories for 40%+ deals...")
     
     for cat_name, base_url in cats:
         if len(all_deals) >= TARGET_DEALS_COUNT:
             break
         
         start = last_page_tracker.get(cat_name, 0) + 1
-        if start > 10:
+        if start > 15:
             start = 1
             last_page_tracker[cat_name] = 0
         
@@ -328,13 +342,20 @@ def search_all_deals():
         logger.info(f"📊 {cat_name}: {len(deals)} | Total: {len(all_deals)}")
         time.sleep(2)
     
-    # ترتيب حسب الخصم
-    all_deals.sort(key=lambda x: x['discount'], reverse=True)
+    # ✅ ترتيب: العروض فوق 90% الأولى، بعدين الباقي
+    super_deals = [d for d in all_deals if d['discount'] >= 90]
+    normal_deals = [d for d in all_deals if d['discount'] < 90]
+    
+    super_deals.sort(key=lambda x: x['discount'], reverse=True)
+    normal_deals.sort(key=lambda x: x['discount'], reverse=True)
+    
+    # ✅ دمج: السوبر أولاً
+    final_deals = super_deals + normal_deals
     
     # إزالة تكرار
     unique = []
     seen = set()
-    for d in all_deals:
+    for d in final_deals:
         key = d.get('asin') or d['title'][:30]
         if key not in seen:
             seen.add(key)
@@ -344,50 +365,86 @@ def search_all_deals():
             break
     
     save_database()
-    logger.info(f"🎯 FINAL: {len(unique)} deals")
+    logger.info(f"🎯 FINAL: {len(unique)} deals | Super (90%+): {len(super_deals)}")
     return unique
 
-# ================== إرسال (مبسط) ==================
+# ================== إرسال ==================
 def send_deals(deals, chat_id):
     if not deals:
         updater.bot.send_message(
             chat_id=chat_id,
-            text="❌ مفيش عروض لقيتها\n🔄 جرب تاني!",
+            text="❌ مفيش عروض 40%+ لقيتها\n🔄 جرب تاني!",
             parse_mode='Markdown'
         )
         return
     
-    # ✅ ملخص
-    msg = f"🔥 *لقيت {len(deals)} عرض!*\n\n"
+    # ✅ فصل العروض
+    super_deals = [d for d in deals if d['discount'] >= 90]
+    normal_deals = [d for d in deals if d['discount'] < 90]
     
-    for idx, d in enumerate(deals, 1):
-        if d['id'] in sent_products:
-            continue
+    # ✅ رسالة السوبر ديلز (90%+)
+    if super_deals:
+        super_msg = "🚨🚨🚨 *عروض خرافية 90%+* 🚨🚨🚨\n\n"
         
-        # ✅ تنسيق بسيط: اسم + سعر + لينك
-        old_price = f"~~{d['old_price']:.0f}~~ " if d.get('old_price') else ""
-        
-        msg += f"""{idx}. *{d['title'][:60]}*
-💰 {d['price']:.0f} ريال {old_price}({d['discount']}%)
-🔗 [اشتري من هنا]({d['link']})
+        for idx, d in enumerate(super_deals, 1):
+            old_price = f"~~{d['old_price']:.0f}~~ " if d.get('old_price') else ""
+            
+            super_msg += f"""{idx}. *{d['title'][:50]}*
+💰 {d['price']:.0f} ريال {old_price}
+🔥🔥🔥 خصم: *{d['discount']}%* 🔥🔥🔥
+🔗 [اشتري بسرعة]({d['link']})
 
 """
         
-        # ✅ نبعت كل 5 منتجات في رسالة
-        if idx % 5 == 0 or idx == len(deals):
-            try:
-                updater.bot.send_message(
-                    chat_id=chat_id, 
-                    text=msg, 
-                    parse_mode='Markdown',
-                    disable_web_page_preview=True
-                )
-                msg = ""
-            except Exception as e:
-                logger.error(f"Send error: {e}")
-            
-            time.sleep(0.5)
+        try:
+            updater.bot.send_message(
+                chat_id=chat_id, 
+                text=super_msg, 
+                parse_mode='Markdown',
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logger.error(f"Super send error: {e}")
         
+        time.sleep(1)
+    
+    # ✅ رسالة العروض العادية (40-89%)
+    if normal_deals:
+        normal_msg = f"🔥 *عروض رهيبة 40%+* ({len(normal_deals)} منتج)\n\n"
+        
+        for idx, d in enumerate(normal_deals, 1):
+            if d['id'] in sent_products:
+                continue
+            
+            old_price = f"~~{d['old_price']:.0f}~~ " if d.get('old_price') else ""
+            
+            normal_msg += f"""{idx}. *{d['title'][:50]}*
+💰 {d['price']:.0f} ريال {old_price}
+📉 خصم: *{d['discount']}%*
+🔗 [اشتري من هنا]({d['link']})
+
+"""
+            
+            # ✅ نبعت كل 5 منتجات
+            if idx % 5 == 0 or idx == len(normal_deals):
+                try:
+                    updater.bot.send_message(
+                        chat_id=chat_id, 
+                        text=normal_msg, 
+                        parse_mode='Markdown',
+                        disable_web_page_preview=True
+                    )
+                    normal_msg = ""
+                except Exception as e:
+                    logger.error(f"Normal send error: {e}")
+                
+                time.sleep(0.5)
+            
+            sent_products.add(d['id'])
+            sent_hashes.add(create_title_hash(d['title']))
+    
+    # ✅ نضيف السوبر للـ sent_products
+    for d in super_deals:
         sent_products.add(d['id'])
         sent_hashes.add(create_title_hash(d['title']))
     
@@ -397,8 +454,8 @@ def send_deals(deals, chat_id):
 def start_cmd(update: Update, context: CallbackContext):
     welcome = """👋 *أهلا بيك في بوت عروض أمازون!*
 
-🔥 *كل مرة بيبعت 20 منتج على الأقل*
-💰 خصم 40%+ | ⭐ 3 نجوم+
+🔥 *خصومات 40%+ فقط*
+🚨 *عروض 90%+ بشكل خاص*
 
 اكتب *Hi* عشان تبدأ"""
     update.message.reply_text(welcome, parse_mode='Markdown')
@@ -413,7 +470,7 @@ def hi_cmd(update: Update, context: CallbackContext):
     is_scanning = True
     
     status = update.message.reply_text(
-        "🔍 *بدور في كل الأقسام...*\n⏳ *الوقت المتوقع: 2-3 دقايق*",
+        "🔍 *بدور على عروض 40%+...*\n⏳ *الوقت المتوقع: 2-3 دقايق*",
         parse_mode='Markdown'
     )
 
