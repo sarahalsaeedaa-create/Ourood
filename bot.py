@@ -14,7 +14,7 @@ import random
 import hashlib
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from collections import deque
+from collections import deque, defaultdict
 
 # ================== إعدادات عامة ==================
 logging.basicConfig(
@@ -33,21 +33,16 @@ is_scanning = False
 updater = None
 
 # ============ إعدادات البحث ============
-# ❌❌❌ ملغي: مفيش عدد محدد - يخلص القسم كله
-MIN_DISCOUNT = 40          # خصم 40%+
-MIN_RATING = 3.0           # 3 نجوم+
+MIN_DISCOUNT = 40
+MIN_RATING = 3.0
 
-# ✅ الأقسام مرتبة حسب البيانات الفعلية لسوق السعودية 2026
-# الأرقام: 1-12 Best Sellers | 13-18 Deals | 19-39 Apple | 40-49 Samsung
-# 50-69 Perfumes | 70-89 Beauty | 90-109 Home | 110-129 Fashion
-# 130-149 Automotive | 150-169 Baby | 170-189 Sports | 190-209 Kitchen
-# 210-229 Smart Home | 230-249 Grocery | 250-269 Laptops | 270-289 Power
-# 290-309 General Electronics | 310-329 Toys | 330-349 Jewelry
-# 350-369 Watches | 370-389 Sunglasses | 390-409 Shoes
-# 410-429 Bags | 430-449 Books | 450-469 Office
+# ✅ الترندينج: منتج يعتبر "ترند" لو عنده مراجعات كتير حتى لو خصمه أقل
+TRENDING_MIN_REVIEWS = 500      # 500+ مراجعة = شعبي
+TRENDING_MIN_RATING = 4.0       # 4 نجوم+ عشان نضمن الجودة
+TRENDING_MIN_DISCOUNT = 10      # خصم 10%+ بس (مش لازم 40%)
 
 CATEGORIES_DEF = [
-    # ⭐⭐⭐ BEST SELLERS SAUDI - أولوية قصوى (الأقسام 1-12)
+    # ⭐⭐⭐ BEST SELLERS SAUDI
     ("https://www.amazon.sa/gp/bestsellers", "⭐ Best Sellers - السعودية الكل", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/beauty", "⭐ Best Sellers - Beauty & Personal Care", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/electronics", "⭐ Best Sellers - Electronics", 'best_sellers'),
@@ -60,16 +55,16 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/gp/bestsellers/baby", "⭐ Best Sellers - Baby", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/pet", "⭐ Best Sellers - Pet Supplies", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/office", "⭐ Best Sellers - Office", 'best_sellers'),
-    
-    # 🔥🔥🔥 DEALS الرسمية - ثاني أولوية (الأقسام 13-18)
+
+    # 🔥🔥🔥 DEALS الرسمية
     ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox - الصفقات اليومية", 'deals'),
     ("https://www.amazon.sa/gp/prime/pipeline/lightning_deals", "⚡ Lightning Deals - عروض فلاش", 'lightning'),
     ("https://www.amazon.sa/gp/todays-deals", "📅 Today's Deals - عروض اليوم", 'today'),
     ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse - مستعمل ممتاز", 'warehouse'),
     ("https://www.amazon.sa/gp/coupons", "🎟️ Coupons - كوبونات", 'coupons'),
     ("https://www.amazon.sa/outlet", "🎁 Outlet - مخلفات بأسعار مخفضة", 'outlet'),
-    
-    # 🍎🍎🍎 APPLE - ربحية خرافية للأفلييت في السعودية (الأقسام 19-39)
+
+    # 🍎 APPLE
     ("https://www.amazon.sa/s?k=iphone+15+pro+max&rh=p_8%3A30-99", "🍎 iPhone 15 Pro Max", 'search'),
     ("https://www.amazon.sa/s?k=iphone+15+pro&rh=p_8%3A30-99", "🍎 iPhone 15 Pro", 'search'),
     ("https://www.amazon.sa/s?k=iphone+15&rh=p_8%3A30-99", "🍎 iPhone 15", 'search'),
@@ -91,8 +86,8 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=airtag&rh=p_8%3A30-99", "🍎 AirTag", 'search'),
     ("https://www.amazon.sa/s?k=magsafe&rh=p_8%3A30-99", "🍎 MagSafe", 'search'),
     ("https://www.amazon.sa/s?k=apple+pencil&rh=p_8%3A30-99", "🍎 Apple Pencil", 'search'),
-    
-    # 📱📱📱 SAMSUNG - منافس Apple في السعودية (الأقسام 40-49)
+
+    # 📱 SAMSUNG
     ("https://www.amazon.sa/s?k=samsung+galaxy+s24+ultra&rh=p_8%3A30-99", "📱 Galaxy S24 Ultra", 'search'),
     ("https://www.amazon.sa/s?k=samsung+galaxy+s24+plus&rh=p_8%3A30-99", "📱 Galaxy S24 Plus", 'search'),
     ("https://www.amazon.sa/s?k=samsung+galaxy+s24&rh=p_8%3A30-99", "📱 Galaxy S24", 'search'),
@@ -103,8 +98,8 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=samsung+galaxy+watch+6&rh=p_8%3A30-99", "📱 Galaxy Watch 6", 'search'),
     ("https://www.amazon.sa/s?k=samsung+galaxy+buds+2+pro&rh=p_8%3A30-99", "📱 Galaxy Buds 2 Pro", 'search'),
     ("https://www.amazon.sa/s?k=samsung+galaxy+buds+fe&rh=p_8%3A30-99", "📱 Galaxy Buds FE", 'search'),
-    
-    # 🌸🌸🌸 PERFUMES - السعوديون الأكثر إنفاقاً على العطور عالمياً (الأقسام 50-69)
+
+    # 🌸 PERFUMES
     ("https://www.amazon.sa/s?k=tom+ford+oud+wood&rh=p_8%3A30-99", "🌸 Tom Ford Oud Wood", 'search'),
     ("https://www.amazon.sa/s?k=tom+ford+black+orchid&rh=p_8%3A30-99", "🌸 Tom Ford Black Orchid", 'search'),
     ("https://www.amazon.sa/s?k=creed+aventus&rh=p_8%3A30-99", "🌸 Creed Aventus", 'search'),
@@ -124,17 +119,16 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=armani+stronger+with+you&rh=p_8%3A30-99", "🌸 Armani Stronger With You", 'search'),
     ("https://www.amazon.sa/s?k=yves+saint+laurent+libre&rh=p_8%3A30-99", "🌸 YSL Libre", 'search'),
     ("https://www.amazon.sa/s?k=reef+perfume&rh=p_8%3A30-99", "🌸 Reef Perfume - سعودي", 'search'),
-    
-    # 💄💄💄 BEAUTY & SKINCARE - الأكثر مبيعاً في السعودية (الأقسام 70-89)
+
+    # 💄 BEAUTY & SKINCARE
     ("https://www.amazon.sa/s?k=la+mer&rh=p_8%3A30-99", "💆 La Mer", 'search'),
     ("https://www.amazon.sa/s?k=sk+ii&rh=p_8%3A30-99", "💆 SK-II", 'search'),
     ("https://www.amazon.sa/s?k=estee+lauder+advanced+night+repair&rh=p_8%3A30-99", "💆 Estée Lauder ANR", 'search'),
     ("https://www.amazon.sa/s?k=lancome+genifique&rh=p_8%3A30-99", "💆 Lancôme Génifique", 'search'),
     ("https://www.amazon.sa/s?k=clarins+double+serum&rh=p_8%3A30-99", "💆 Clarins Double Serum", 'search'),
-    ("https://www.amazon.sa/s?k=johnson+vita+rich&rh=p_8%3A30-99", "💆 Johnson Vita-Rich - #1", 'search'),
-    ("https://www.amazon.sa/s?k=herbal+essences+argan&rh=p_8%3A30-99", "💆 Herbal Essences Argan - #2", 'search'),
+    ("https://www.amazon.sa/s?k=johnson+vita+rich&rh=p_8%3A30-99", "💆 Johnson Vita-Rich", 'search'),
+    ("https://www.amazon.sa/s?k=herbal+essences+argan&rh=p_8%3A30-99", "💆 Herbal Essences Argan", 'search'),
     ("https://www.amazon.sa/s?k=cosrx+pimple+patch&rh=p_8%3A30-99", "💆 COSRX Pimple Patch", 'search'),
-    ("https://www.amazon.sa/s?k=mighty+patch&rh=p_8%3A30-99", "💆 Mighty Patch", 'search'),
     ("https://www.amazon.sa/s?k=the+ordinary&rh=p_8%3A30-99", "💆 The Ordinary", 'search'),
     ("https://www.amazon.sa/s?k=cerave&rh=p_8%3A30-99", "💆 CeraVe", 'search'),
     ("https://www.amazon.sa/s?k=neutrogena&rh=p_8%3A30-99", "💆 Neutrogena", 'search'),
@@ -143,431 +137,134 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=nars&rh=p_8%3A30-99", "💄 NARS", 'search'),
     ("https://www.amazon.sa/s?k=huda+beauty&rh=p_8%3A30-99", "💄 Huda Beauty", 'search'),
     ("https://www.amazon.sa/s?k=fenty+beauty&rh=p_8%3A30-99", "💄 Fenty Beauty", 'search'),
-    ("https://www.amazon.sa/s?k=revolution+beauty&rh=p_8%3A30-99", "💄 Revolution Beauty - #1", 'search'),
-    ("https://www.amazon.sa/s?k=dabur+amla&rh=p_8%3A30-99", "💆 Dabur Amla - #1 Hair", 'search'),
-    ("https://www.amazon.sa/s?k=johnson+body+wash&rh=p_8%3A30-99", "🧴 Johnson Body Wash - #1 Bath", 'search'),
-    
-    # 🏠🏠🏠 HOME & KITCHEN - الأكثر مبيعاً في السعودية (الأقسام 90-109)
+    ("https://www.amazon.sa/s?k=revolution+beauty&rh=p_8%3A30-99", "💄 Revolution Beauty", 'search'),
+    ("https://www.amazon.sa/s?k=dabur+amla&rh=p_8%3A30-99", "💆 Dabur Amla", 'search'),
+    ("https://www.amazon.sa/s?k=johnson+body+wash&rh=p_8%3A30-99", "🧴 Johnson Body Wash", 'search'),
+
+    # 🏠 HOME & KITCHEN
     ("https://www.amazon.sa/s?k=dyson+v15&rh=p_8%3A30-99", "🏠 Dyson V15", 'search'),
     ("https://www.amazon.sa/s?k=dyson+gen5&rh=p_8%3A30-99", "🏠 Dyson Gen5", 'search'),
     ("https://www.amazon.sa/s?k=dyson+airwrap&rh=p_8%3A30-99", "🏠 Dyson Airwrap", 'search'),
     ("https://www.amazon.sa/s?k=dyson+supersonic&rh=p_8%3A30-99", "🏠 Dyson Supersonic", 'search'),
-    ("https://www.amazon.sa/s?k=levoit+air+purifier&rh=p_8%3A30-99", "🏠 Levoit Air Purifier - #1", 'search'),
+    ("https://www.amazon.sa/s?k=levoit+air+purifier&rh=p_8%3A30-99", "🏠 Levoit Air Purifier", 'search'),
     ("https://www.amazon.sa/s?k=nespresso+vertuo&rh=p_8%3A30-99", "☕ Nespresso Vertuo", 'search'),
     ("https://www.amazon.sa/s?k=nespresso+original&rh=p_8%3A30-99", "☕ Nespresso Original", 'search'),
     ("https://www.amazon.sa/s?k=breville+barista&rh=p_8%3A30-99", "☕ Breville Barista", 'search'),
     ("https://www.amazon.sa/s?k=kitchenaid+stand+mixer&rh=p_8%3A30-99", "🍳 KitchenAid Stand Mixer", 'search'),
     ("https://www.amazon.sa/s?k=philips+air+fryer+premium&rh=p_8%3A30-99", "🍳 Philips Air Fryer Premium", 'search'),
-    ("https://www.amazon.sa/s?k=lg+instaview&rh=p_8%3A30-99", "❄️ LG InstaView", 'search'),
-    ("https://www.amazon.sa/s?k=samsung+bespoke&rh=p_8%3A30-99", "❄️ Samsung Bespoke", 'search'),
-    ("https://www.amazon.sa/s?k=stanley+tumbler&rh=p_8%3A30-99", "🏠 Stanley Tumbler - ترندي", 'search'),
-    ("https://www.amazon.sa/s?k=owala&rh=p_8%3A30-99", "🏠 Owala", 'search'),
-    ("https://www.amazon.sa/s?k=vileda&rh=p_8%3A30-99", "🏠 Vileda - #1 Home", 'search'),
-    ("https://www.amazon.sa/s?k=ultrean&rh=p_8%3A30-99", "🏠 Ultrean", 'search'),
-    ("https://www.amazon.sa/s?k=smeg&rh=p_8%3A30-99", "🏠 Smeg", 'search'),
+    ("https://www.amazon.sa/s?k=stanley+tumbler&rh=p_8%3A30-99", "🏠 Stanley Tumbler", 'search'),
+    ("https://www.amazon.sa/s?k=vileda&rh=p_8%3A30-99", "🏠 Vileda", 'search'),
     ("https://www.amazon.sa/s?k=downy+fabric+softener&rh=p_8%3A30-99", "🧴 Downy Fabric Softener", 'search'),
-    ("https://www.amazon.sa/s?k=comfort+fabric+softener&rh=p_8%3A30-99", "🧴 Comfort Fabric Softener", 'search'),
-    ("https://www.amazon.sa/s?k=fairy+dishwashing&rh=p_8%3A30-99", "🧴 Fairy Dishwashing - #1", 'search'),
-    
-    # 🧳🧳🧳 FASHION & LUGGAGE - الأكثر مبيعاً في السعودية (الأقسام 110-129)
-    ("https://www.amazon.sa/s?k=sky+touch+luggage+organizer&rh=p_8%3A30-99", "🧳 SKY-TOUCH Luggage Organizer - #1", 'search'),
-    ("https://www.amazon.sa/s?k=joto+water+shoes&rh=p_8%3A30-99", "👟 JOTO Water Shoes - #2", 'search'),
-    ("https://www.amazon.sa/s?k=cotton+crew+socks&rh=p_8%3A30-99", "🧦 Cotton Crew Socks", 'search'),
-    ("https://www.amazon.sa/s?k=luggage+scale&rh=p_8%3A30-99", "🧳 Luggage Scale", 'search'),
-    ("https://www.amazon.sa/s?k=nike+air+jordan&rh=p_8%3A30-99", "👟 Nike Air Jordan", 'search'),
-    ("https://www.amazon.sa/s?k=nike+dunk&rh=p_8%3A30-99", "👟 Nike Dunk", 'search'),
-    ("https://www.amazon.sa/s?k=adidas+ultraboost&rh=p_8%3A30-99", "👟 Adidas Ultraboost", 'search'),
-    ("https://www.amazon.sa/s?k=new+balance+990&rh=p_8%3A30-99", "👟 New Balance 990", 'search'),
-    ("https://www.amazon.sa/s?k=asics+gel+kayano&rh=p_8%3A30-99", "👟 ASICS Gel Kayano", 'search'),
-    ("https://www.amazon.sa/s?k=hoka&rh=p_8%3A30-99", "👟 HOKA", 'search'),
-    ("https://www.amazon.sa/s?k=on+running&rh=p_8%3A30-99", "👟 On Running", 'search'),
-    ("https://www.amazon.sa/s?k=salomon&rh=p_8%3A30-99", "👟 Salomon", 'search'),
-    ("https://www.amazon.sa/s?k=ray+ban+aviator&rh=p_8%3A30-99", "🕶️ Ray-Ban Aviator", 'search'),
-    ("https://www.amazon.sa/s?k=ray+ban+wayfarer&rh=p_8%3A30-99", "🕶️ Ray-Ban Wayfarer", 'search'),
-    ("https://www.amazon.sa/s?k=oakley+holbrook&rh=p_8%3A30-99", "🕶️ Oakley Holbrook", 'search'),
-    ("https://www.amazon.sa/s?k=prada+sunglasses&rh=p_8%3A30-99", "🕶️ Prada", 'search'),
-    ("https://www.amazon.sa/s?k=gucci+sunglasses&rh=p_8%3A30-99", "🕶️ Gucci", 'search'),
-    ("https://www.amazon.sa/s?k=versace+sunglasses&rh=p_8%3A30-99", "🕶️ Versace", 'search'),
-    ("https://www.amazon.sa/s?k=burberry+sunglasses&rh=p_8%3A30-99", "🕶️ Burberry", 'search'),
-    ("https://www.amazon.sa/s?k=tumi+luggage&rh=p_8%3A30-99", "🧳 TUMI - بريميوم", 'search'),
-    
-    # 🚗🚗🚗 AUTOMOTIVE - الأكثر مبيعاً في السعودية (الأقسام 130-149)
-    ("https://www.amazon.sa/s?k=showtop+microfiber&rh=p_8%3A30-99", "🚗 ShowTop Microfiber - #1", 'search'),
-    ("https://www.amazon.sa/s?k=shell+helix+ultra&rh=p_8%3A30-99", "🚗 Shell Helix Ultra - #2", 'search'),
+    ("https://www.amazon.sa/s?k=fairy+dishwashing&rh=p_8%3A30-99", "🧴 Fairy Dishwashing", 'search'),
+
+    # 🚗 AUTOMOTIVE
+    ("https://www.amazon.sa/s?k=showtop+microfiber&rh=p_8%3A30-99", "🚗 ShowTop Microfiber", 'search'),
+    ("https://www.amazon.sa/s?k=shell+helix+ultra&rh=p_8%3A30-99", "🚗 Shell Helix Ultra", 'search'),
     ("https://www.amazon.sa/s?k=car+windshield+sun+shade&rh=p_8%3A30-99", "🚗 Car Sun Shade", 'search'),
-    ("https://www.amazon.sa/s?k=car+seat+gap+storage&rh=p_8%3A30-99", "🚗 Car Seat Gap Storage", 'search'),
     ("https://www.amazon.sa/s?k=car+organizer&rh=p_8%3A30-99", "🚗 Car Organizer", 'search'),
-    ("https://www.amazon.sa/s?k=michelin+pilot+sport&rh=p_8%3A30-99", "🚗 Michelin Pilot Sport", 'search'),
-    ("https://www.amazon.sa/s?k=continental+premiumcontact&rh=p_8%3A30-99", "🚗 Continental PremiumContact", 'search'),
     ("https://www.amazon.sa/s?k=garmin+dash+cam&rh=p_8%3A30-99", "🚗 Garmin Dash Cam", 'search'),
     ("https://www.amazon.sa/s?k=chemical+guys&rh=p_8%3A30-99", "🚗 Chemical Guys", 'search'),
-    ("https://www.amazon.sa/s?k=adam%27s+polishes&rh=p_8%3A30-99", "🚗 Adam's Polishes", 'search'),
-    ("https://www.amazon.sa/s?k=car+vacuum&rh=p_8%3A30-99", "🚗 Car Vacuum", 'search'),
-    ("https://www.amazon.sa/s?k=car+air+freshener&rh=p_8%3A30-99", "🚗 Car Air Freshener", 'search'),
-    ("https://www.amazon.sa/s?k=tire+inflator&rh=p_8%3A30-99", "🚗 Tire Inflator", 'search'),
     ("https://www.amazon.sa/s?k=jump+starter&rh=p_8%3A30-99", "🚗 Jump Starter", 'search'),
-    ("https://www.amazon.sa/s?k=dash+cam+4k&rh=p_8%3A30-99", "🚗 Dash Cam 4K", 'search'),
     ("https://www.amazon.sa/s?k=car+phone+mount&rh=p_8%3A30-99", "🚗 Car Phone Mount", 'search'),
-    ("https://www.amazon.sa/s?k=car+charger+fast&rh=p_8%3A30-99", "🚗 Car Charger Fast", 'search'),
-    ("https://www.amazon.sa/s?k=seat+cover+leather&rh=p_8%3A30-99", "🚗 Seat Cover Leather", 'search'),
-    ("https://www.amazon.sa/s?k=steering+wheel+cover&rh=p_8%3A30-99", "🚗 Steering Wheel Cover", 'search'),
-    ("https://www.amazon.sa/s?k=car+mat+premium&rh=p_8%3A30-99", "🚗 Car Mat Premium", 'search'),
-    
-    # 👶👶👶 BABY - الأكثر مبيعاً في السعودية (الأقسام 150-169)
-    ("https://www.amazon.sa/s?k=pampers&rh=p_8%3A30-99", "👶 Pampers - #1", 'search'),
-    ("https://www.amazon.sa/s?k=waterwipes&rh=p_8%3A30-99", "👶 WaterWipes - #2", 'search'),
-    ("https://www.amazon.sa/s?k=bugaboo&rh=p_8%3A30-99", "👶 Bugaboo - بريميوم", 'search'),
-    ("https://www.amazon.sa/s?k=stokke&rh=p_8%3A30-99", "👶 Stokke - نرويجي", 'search'),
-    ("https://www.amazon.sa/s?k=cybex+priam&rh=p_8%3A30-99", "👶 Cybex Priam", 'search'),
-    ("https://www.amazon.sa/s?k=nuna&rh=p_8%3A30-99", "👶 Nuna", 'search'),
+
+    # 👶 BABY
+    ("https://www.amazon.sa/s?k=pampers&rh=p_8%3A30-99", "👶 Pampers", 'search'),
+    ("https://www.amazon.sa/s?k=waterwipes&rh=p_8%3A30-99", "👶 WaterWipes", 'search'),
+    ("https://www.amazon.sa/s?k=bugaboo&rh=p_8%3A30-99", "👶 Bugaboo", 'search'),
     ("https://www.amazon.sa/s?k=philips+avent+premium&rh=p_8%3A30-99", "👶 Philips Avent Premium", 'search'),
     ("https://www.amazon.sa/s?k=medela&rh=p_8%3A30-99", "👶 Medela", 'search'),
-    ("https://www.amazon.sa/s?k=willow+pump&rh=p_8%3A30-99", "👶 Willow Pump", 'search'),
-    ("https://www.amazon.sa/s?k=elvie&rh=p_8%3A30-99", "👶 Elvie", 'search'),
-    ("https://www.amazon.sa/s?k=owlet&rh=p_8%3A30-99", "👶 Owlet - مونيتور ذكي", 'search'),
     ("https://www.amazon.sa/s?k=fisher+price&rh=p_8%3A30-99", "👶 Fisher-Price", 'search'),
-    ("https://www.amazon.sa/s?k=melissa+doug&rh=p_8%3A30-99", "👶 Melissa & Doug", 'search'),
     ("https://www.amazon.sa/s?k=lego+duplo&rh=p_8%3A30-99", "🧱 LEGO DUPLO", 'search'),
-    ("https://www.amazon.sa/s?k=vtech&rh=p_8%3A30-99", "👶 VTech", 'search'),
-    ("https://www.amazon.sa/s?k=skip+hop&rh=p_8%3A30-99", "👶 Skip Hop", 'search'),
-    ("https://www.amazon.sa/s?k=ergobaby&rh=p_8%3A30-99", "👶 Ergobaby", 'search'),
-    ("https://www.amazon.sa/s?k=baby+bjorn&rh=p_8%3A30-99", "👶 BabyBjörn", 'search'),
-    ("https://www.amazon.sa/s?k=doona&rh=p_8%3A30-99", "👶 Doona - ترندي", 'search'),
-    ("https://www.amazon.sa/s?k=uppababy&rh=p_8%3A30-99", "👶 UPPAbaby - أمريكي", 'search'),
-    
-    # 🏋️🏋️🏋️ SPORTS & FITNESS - السعوديون يهتمون باللياقة (الأقسام 170-189)
-    ("https://www.amazon.sa/s?k=bowflex&rh=p_8%3A30-99", "🏋️ Bowflex", 'search'),
-    ("https://www.amazon.sa/s?k=nordictrack&rh=p_8%3A30-99", "🏋️ NordicTrack", 'search'),
-    ("https://www.amazon.sa/s?k=peloton&rh=p_8%3A30-99", "🏋️ Peloton", 'search'),
-    ("https://www.amazon.sa/s?k=concept2&rh=p_8%3A30-99", "🏋️ Concept2", 'search'),
+    ("https://www.amazon.sa/s?k=doona&rh=p_8%3A30-99", "👶 Doona", 'search'),
+
+    # 🏋️ SPORTS
     ("https://www.amazon.sa/s?k=theragun&rh=p_8%3A30-99", "🏋️ Theragun", 'search'),
-    ("https://www.amazon.sa/s?k=hyperice&rh=p_8%3A30-99", "🏋️ Hyperice", 'search'),
-    ("https://www.amazon.sa/s?k=whoop&rh=p_8%3A30-99", "🏋️ WHOOP", 'search'),
     ("https://www.amazon.sa/s?k=oura+ring&rh=p_8%3A30-99", "🏋️ Oura Ring", 'search'),
     ("https://www.amazon.sa/s?k=optimum+nutrition&rh=p_8%3A30-99", "💪 Optimum Nutrition", 'search'),
-    ("https://www.amazon.sa/s?k=dymatize+iso+100&rh=p_8%3A30-99", "💪 Dymatize ISO100", 'search'),
-    ("https://www.amazon.sa/s?k=cellucor+c4&rh=p_8%3A30-99", "💪 Cellucor C4", 'search'),
-    ("https://www.amazon.sa/s?k=bicycle&rh=p_8%3A30-99", "🚲 Bicycle", 'search'),
-    ("https://www.amazon.sa/s?k=camping&rh=p_8%3A30-99", "⛺ Camping", 'search'),
     ("https://www.amazon.sa/s?k=yoga+mat+premium&rh=p_8%3A30-99", "🧘 Yoga Mat Premium", 'search'),
     ("https://www.amazon.sa/s?k=resistance+bands+set&rh=p_8%3A30-99", "🏋️ Resistance Bands", 'search'),
-    ("https://www.amazon.sa/s?k=kettlebell+set&rh=p_8%3A30-99", "🏋️ Kettlebell Set", 'search'),
     ("https://www.amazon.sa/s?k=dumbbells+adjustable&rh=p_8%3A30-99", "🏋️ Dumbbells Adjustable", 'search'),
     ("https://www.amazon.sa/s?k=treadmill+folding&rh=p_8%3A30-99", "🏃 Treadmill Folding", 'search'),
-    ("https://www.amazon.sa/s?k=elliptical+machine&rh=p_8%3A30-99", "🏃 Elliptical Machine", 'search'),
-    ("https://www.amazon.sa/s?k=rowing+machine&rh=p_8%3A30-99", "🏃 Rowing Machine", 'search'),
-    
-    # 🍳🍳🍳 KITCHEN APPLIANCES - بديل Gaming (الأقسام 190-209)
-    ("https://www.amazon.sa/s?k=air+fryer+ninja&rh=p_8%3A30-99", "🍳 Ninja Air Fryer - #1", 'search'),
-    ("https://www.amazon.sa/s?k=instant+pot&rh=p_8%3A30-99", "🍳 Instant Pot - ترندي", 'search'),
-    ("https://www.amazon.sa/s?k=crock+pot&rh=p_8%3A30-99", "🍳 Crock-Pot", 'search'),
-    ("https://www.amazon.sa/s?k=food+processor+magimix&rh=p_8%3A30-99", "🍳 Magimix Food Processor", 'search'),
+
+    # 🍳 KITCHEN APPLIANCES
+    ("https://www.amazon.sa/s?k=air+fryer+ninja&rh=p_8%3A30-99", "🍳 Ninja Air Fryer", 'search'),
+    ("https://www.amazon.sa/s?k=instant+pot&rh=p_8%3A30-99", "🍳 Instant Pot", 'search'),
     ("https://www.amazon.sa/s?k=blender+vitamix&rh=p_8%3A30-99", "🍳 Vitamix Blender", 'search'),
-    ("https://www.amazon.sa/s?k=blender+ninja&rh=p_8%3A30-99", "🍳 Ninja Blender", 'search'),
-    ("https://www.amazon.sa/s?k=stand+mixer+artisan&rh=p_8%3A30-99", "🍳 KitchenAid Artisan", 'search'),
-    ("https://www.amazon.sa/s?k=espresso+machine+breville&rh=p_8%3A30-99", "☕ Breville Espresso", 'search'),
     ("https://www.amazon.sa/s?k=espresso+machine+delonghi&rh=p_8%3A30-99", "☕ DeLonghi Espresso", 'search'),
-    ("https://www.amazon.sa/s?k=coffee+maker+moccamaster&rh=p_8%3A30-99", "☕ Moccamaster - التوب", 'search'),
-    ("https://www.amazon.sa/s?k=sous+vide+anova&rh=p_8%3A30-99", "🍳 Anova Sous Vide", 'search'),
-    ("https://www.amazon.sa/s?k=waffle+maker&rh=p_8%3A30-99", "🍳 Waffle Maker", 'search'),
     ("https://www.amazon.sa/s?k=rice+cooker+zojirushi&rh=p_8%3A30-99", "🍳 Zojirushi Rice Cooker", 'search'),
-    ("https://www.amazon.sa/s?k=toaster+oven+breville&rh=p_8%3A30-99", "🍳 Breville Toaster Oven", 'search'),
-    ("https://www.amazon.sa/s?k=microwave+panasonic&rh=p_8%3A30-99", "📡 Panasonic Microwave", 'search'),
-    ("https://www.amazon.sa/s?k=juicer+hurom&rh=p_8%3A30-99", "🍹 Hurom Juicer", 'search'),
-    ("https://www.amazon.sa/s?k=juicer+breville&rh=p_8%3A30-99", "🍹 Breville Juicer", 'search'),
-    ("https://www.amazon.sa/s?k=meat+grinder&rh=p_8%3A30-99", "🍳 Meat Grinder", 'search'),
-    ("https://www.amazon.sa/s?k=pasta+maker&rh=p_8%3A30-99", "🍳 Pasta Maker", 'search'),
-    ("https://www.amazon.sa/s?k=ice+cream+maker&rh=p_8%3A30-99", "🍦 Ice Cream Maker", 'search'),
-    
-    # 🏠🏠🏠 SMART HOME - بديل TVs (الأقسام 210-229)
+
+    # 🏠 SMART HOME
     ("https://www.amazon.sa/s?k=philips+hue&rh=p_8%3A30-99", "💡 Philips Hue", 'search'),
     ("https://www.amazon.sa/s?k=ring+doorbell&rh=p_8%3A30-99", "🏠 Ring Doorbell", 'search'),
-    ("https://www.amazon.sa/s?k=arlo+pro&rh=p_8%3A30-99", "🏠 Arlo Pro", 'search'),
-    ("https://www.amazon.sa/s?k=nest+thermostat&rh=p_8%3A30-99", "🏠 Nest Thermostat", 'search'),
     ("https://www.amazon.sa/s?k=roborock&rh=p_8%3A30-99", "🏠 Roborock", 'search'),
-    ("https://www.amazon.sa/s?k=ecovacs&rh=p_8%3A30-99", "🏠 Ecovacs", 'search'),
     ("https://www.amazon.sa/s?k=irobot+roomba&rh=p_8%3A30-99", "🏠 iRobot Roomba", 'search'),
-    ("https://www.amazon.sa/s?k=wyze&rh=p_8%3A30-99", "🏠 Wyze", 'search'),
     ("https://www.amazon.sa/s?k=eufy+security&rh=p_8%3A30-99", "🏠 eufy Security", 'search'),
-    ("https://www.amazon.sa/s?k=aqara&rh=p_8%3A30-99", "🏠 Aqara - سمارت هوم", 'search'),
-    ("https://www.amazon.sa/s?k=zigbee+hub&rh=p_8%3A30-99", "🏠 Zigbee Hub", 'search'),
-    ("https://www.amazon.sa/s?k=smart+lock+yale&rh=p_8%3A30-99", "🏠 Yale Smart Lock", 'search'),
-    ("https://www.amazon.sa/s?k=smart+lock+august&rh=p_8%3A30-99", "🏠 August Smart Lock", 'search'),
-    ("https://www.amazon.sa/s?k=video+doorbell+ezviz&rh=p_8%3A30-99", "🏠 EZVIZ Doorbell", 'search'),
-    ("https://www.amazon.sa/s?k=security+camera+reolink&rh=p_8%3A30-99", "🏠 Reolink Camera", 'search'),
-    ("https://www.amazon.sa/s?k=smart+plug+kasa&rh=p_8%3A30-99", "🏠 Kasa Smart Plug", 'search'),
-    ("https://www.amazon.sa/s?k=smart+switch+leviton&rh=p_8%3A30-99", "🏠 Leviton Smart Switch", 'search'),
-    ("https://www.amazon.sa/s?k=air+purifier+levoit&rh=p_8%3A30-99", "🏠 Levoit Air Purifier", 'search'),
-    ("https://www.amazon.sa/s?k=humidifier+dyson&rh=p_8%3A30-99", "🏠 Dyson Humidifier", 'search'),
-    ("https://www.amazon.sa/s?k=dehumidifier&rh=p_8%3A30-99", "🏠 Dehumidifier", 'search'),
-    
-    # 🍚🍚🍚 GROCERY - السعوديون يشترون بالجملة (الأقسام 230-249)
-    ("https://www.amazon.sa/s?k=nestle+pure+life+water&rh=p_8%3A30-99", "🍚 Nestlé Pure Life Water - #1", 'search'),
-    ("https://www.amazon.sa/s?k=nadec+milk&rh=p_8%3A30-99", "🍚 Nadec Milk - #2", 'search'),
-    ("https://www.amazon.sa/s?k=berain+water&rh=p_8%3A30-99", "🍚 Berain Water", 'search'),
-    ("https://www.amazon.sa/s?k=abu+kass+rice&rh=p_8%3A30-99", "🍚 Abu Kass Rice", 'search'),
+
+    # 🍚 GROCERY
+    ("https://www.amazon.sa/s?k=nestle+pure+life+water&rh=p_8%3A30-99", "🍚 Nestlé Pure Life Water", 'search'),
     ("https://www.amazon.sa/s?k=basmati+rice&rh=p_8%3A30-99", "🍚 Basmati Rice", 'search'),
-    ("https://www.amazon.sa/s?k=maharaja+rice&rh=p_8%3A30-99", "🍚 Maharaja Rice", 'search'),
-    ("https://www.amazon.sa/s?k=india+gate+rice&rh=p_8%3A30-99", "🍚 India Gate Rice", 'search'),
-    ("https://www.amazon.sa/s?k=daawat+rice&rh=p_8%3A30-99", "🍚 Daawat Rice", 'search'),
     ("https://www.amazon.sa/s?k=almarai+milk&rh=p_8%3A30-99", "🍚 Almarai Milk", 'search'),
-    ("https://www.amazon.sa/s?k=almarai+yogurt&rh=p_8%3A30-99", "🍚 Almarai Yogurt", 'search'),
-    ("https://www.amazon.sa/s?k=nadec+juice&rh=p_8%3A30-99", "🍚 Nadec Juice", 'search'),
-    ("https://www.amazon.sa/s?k=vimto&rh=p_8%3A30-99", "🍚 Vimto - رمضان", 'search'),
-    ("https://www.amazon.sa/s?k=tang+orange&rh=p_8%3A30-99", "🍚 Tang Orange", 'search'),
+    ("https://www.amazon.sa/s?k=vimto&rh=p_8%3A30-99", "🍚 Vimto", 'search'),
     ("https://www.amazon.sa/s?k=nescafe+gold&rh=p_8%3A30-99", "☕ Nescafé Gold", 'search'),
-    ("https://www.amazon.sa/s?k=starbucks+coffee+beans&rh=p_8%3A30-99", "☕ Starbucks Coffee", 'search'),
-    ("https://www.amazon.sa/s?k=lavazza+coffee&rh=p_8%3A30-99", "☕ Lavazza Coffee", 'search'),
-    ("https://www.amazon.sa/s?k=illy+coffee&rh=p_8%3A30-99", "☕ illy Coffee", 'search'),
-    ("https://www.amazon.sa/s?k=dates+ajwa&rh=p_8%3A30-99", "🍚 Ajwa Dates - سعودي", 'search'),
-    ("https://www.amazon.sa/s?k=dates+sukkari&rh=p_8%3A30-99", "🍚 Sukkari Dates", 'search'),
-    ("https://www.amazon.sa/s?k=dates+medjool&rh=p_8%3A30-99", "🍚 Medjool Dates", 'search'),
-    
-    # 💻💻💻 LAPTOPS - السوق السعودي يفضل Dell, HP, Lenovo (الأقسام 250-269)
-    ("https://www.amazon.sa/s?k=dell+xps+13&rh=p_8%3A30-99", "💻 Dell XPS 13", 'search'),
+    ("https://www.amazon.sa/s?k=dates+ajwa&rh=p_8%3A30-99", "🍚 Ajwa Dates", 'search'),
+
+    # 💻 LAPTOPS
     ("https://www.amazon.sa/s?k=dell+xps+15&rh=p_8%3A30-99", "💻 Dell XPS 15", 'search'),
     ("https://www.amazon.sa/s?k=hp+spectre&rh=p_8%3A30-99", "💻 HP Spectre", 'search'),
-    ("https://www.amazon.sa/s?k=hp+envy&rh=p_8%3A30-99", "💻 HP Envy", 'search'),
     ("https://www.amazon.sa/s?k=lenovo+thinkpad&rh=p_8%3A30-99", "💻 Lenovo ThinkPad", 'search'),
-    ("https://www.amazon.sa/s?k=lenovo+yoga&rh=p_8%3A30-99", "💻 Lenovo Yoga", 'search'),
-    ("https://www.amazon.sa/s?k=asus+zenbook&rh=p_8%3A30-99", "💻 ASUS ZenBook", 'search'),
     ("https://www.amazon.sa/s?k=asus+rog+zephyrus&rh=p_8%3A30-99", "💻 ASUS ROG Zephyrus", 'search'),
     ("https://www.amazon.sa/s?k=razer+blade&rh=p_8%3A30-99", "💻 Razer Blade", 'search'),
-    ("https://www.amazon.sa/s?k=msi+gaming+laptop&rh=p_8%3A30-99", "💻 MSI Gaming", 'search'),
-    ("https://www.amazon.sa/s?k=surface+laptop&rh=p_8%3A30-99", "💻 Surface Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=surface+pro&rh=p_8%3A30-99", "💻 Surface Pro", 'search'),
-    ("https://www.amazon.sa/s?k=alienware&rh=p_8%3A30-99", "💻 Alienware", 'search'),
-    ("https://www.amazon.sa/s?k=acer+predator&rh=p_8%3A30-99", "💻 Acer Predator", 'search'),
-    ("https://www.amazon.sa/s?k=lg+gram&rh=p_8%3A30-99", "💻 LG Gram", 'search'),
-    ("https://www.amazon.sa/s?k=huawei+matebook&rh=p_8%3A30-99", "💻 Huawei MateBook", 'search'),
-    ("https://www.amazon.sa/s?k=honor+magicbook&rh=p_8%3A30-99", "💻 Honor MagicBook", 'search'),
-    ("https://www.amazon.sa/s?k=realme+book&rh=p_8%3A30-99", "💻 realme Book", 'search'),
-    ("https://www.amazon.sa/s?k=chuwi&rh=p_8%3A30-99", "💻 CHUWI - قيمة", 'search'),
-    ("https://www.amazon.sa/s?k=teclast&rh=p_8%3A30-99", "💻 Teclast - قيمة", 'search'),
-    
-    # 🔋🔋🔋 POWER & CHARGING - إكسسوارات ربحية (الأقسام 270-289)
+
+    # 🔋 POWER & CHARGING
     ("https://www.amazon.sa/s?k=anker+prime&rh=p_8%3A30-99", "🔋 Anker Prime", 'search'),
-    ("https://www.amazon.sa/s?k=anker+737&rh=p_8%3A30-99", "🔋 Anker 737", 'search'),
     ("https://www.amazon.sa/s?k=ugreen+nexode&rh=p_8%3A30-99", "🔋 UGREEN Nexode", 'search'),
     ("https://www.amazon.sa/s?k=baseus+blade&rh=p_8%3A30-99", "🔋 Baseus Blade", 'search'),
-    ("https://www.amazon.sa/s?k=belkin+magsafe&rh=p_8%3A30-99", "🔌 Belkin MagSafe", 'search'),
-    ("https://www.amazon.sa/s?k=mophie&rh=p_8%3A30-99", "🔌 Mophie", 'search'),
-    ("https://www.amazon.sa/s?k=native+union&rh=p_8%3A30-99", "🔌 Native Union", 'search'),
-    ("https://www.amazon.sa/s?k=romoss+sense&rh=p_8%3A30-99", "🔋 ROMOSS", 'search'),
-    ("https://www.amazon.sa/s?k=xiaomi+power+bank&rh=p_8%3A30-99", "🔋 Xiaomi Power Bank", 'search'),
     ("https://www.amazon.sa/s?k=samsung+wireless+charger&rh=p_8%3A30-99", "🔌 Samsung Wireless Charger", 'search'),
-    ("https://www.amazon.sa/s?k=apple+charger+20w&rh=p_8%3A30-99", "🔌 Apple Charger 20W", 'search'),
-    ("https://www.amazon.sa/s?k=apple+charger+30w&rh=p_8%3A30-99", "🔌 Apple Charger 30W", 'search'),
-    ("https://www.amazon.sa/s?k=usb+c+cable+anker&rh=p_8%3A30-99", "🔌 Anker USB-C Cable", 'search'),
-    ("https://www.amazon.sa/s?k=usb+c+cable+belkin&rh=p_8%3A30-99", "🔌 Belkin USB-C Cable", 'search'),
-    ("https://www.amazon.sa/s?k=charging+station+anker&rh=p_8%3A30-99", "🔌 Anker Charging Station", 'search'),
-    ("https://www.amazon.sa/s?k=charging+station+ugreen&rh=p_8%3A30-99", "🔌 UGREEN Charging Station", 'search'),
-    ("https://www.amazon.sa/s?k=car+charger+fast&rh=p_8%3A30-99", "🔌 Car Charger Fast", 'search'),
-    ("https://www.amazon.sa/s?k=wireless+charger+stand&rh=p_8%3A30-99", "🔌 Wireless Charger Stand", 'search'),
-    ("https://www.amazon.sa/s?k=power+strip+smart&rh=p_8%3A30-99", "🔌 Smart Power Strip", 'search'),
-    ("https://www.amazon.sa/s?k=ups+apc&rh=p_8%3A30-99", "🔌 APC UPS", 'search'),
-    
-    # 📱📱📱 GENERAL ELECTRONICS - باقي الإلكترونيات (الأقسام 290-309)
-    ("https://www.amazon.sa/s?k=laptop&rh=p_8%3A30-99", "💻 Laptop - عام", 'search'),
-    ("https://www.amazon.sa/s?k=headphones&rh=p_8%3A30-99", "🎧 Headphones - عام", 'search'),
-    ("https://www.amazon.sa/s?k=keyboard&rh=p_8%3A30-99", "⌨️ Keyboard - عام", 'search'),
-    ("https://www.amazon.sa/s?k=mouse&rh=p_8%3A30-99", "🖱️ Mouse - عام", 'search'),
-    ("https://www.amazon.sa/s?k=router&rh=p_8%3A30-99", "📡 Router - عام", 'search'),
-    ("https://www.amazon.sa/s?k=power+bank&rh=p_8%3A30-99", "🔋 Power Bank - عام", 'search'),
-    ("https://www.amazon.sa/s?k=charger&rh=p_8%3A30-99", "🔌 Charger - عام", 'search'),
-    ("https://www.amazon.sa/s?k=hard+drive&rh=p_8%3A30-99", "💾 Hard Drive - عام", 'search'),
-    ("https://www.amazon.sa/s?k=ssd&rh=p_8%3A30-99", "💾 SSD - عام", 'search'),
-    ("https://www.amazon.sa/s?k=usb&rh=p_8%3A30-99", "💾 USB - عام", 'search'),
-    ("https://www.amazon.sa/s?k=memory+card&rh=p_8%3A30-99", "💾 Memory Card - عام", 'search'),
-    ("https://www.amazon.sa/s?k=tv&rh=p_8%3A30-99", "📺 TV - عام", 'search'),
-    ("https://www.amazon.sa/s?k=monitor&rh=p_8%3A30-99", "🖥️ Monitor - عام", 'search'),
-    ("https://www.amazon.sa/s?k=camera&rh=p_8%3A30-99", "📷 Camera - عام", 'search'),
-    ("https://www.amazon.sa/s?k=watch&rh=p_8%3A30-99", "⌚ Watch - عام", 'search'),
-    ("https://www.amazon.sa/s?k=perfume&rh=p_8%3A30-99", "🌸 Perfume - عام", 'search'),
-    ("https://www.amazon.sa/s?k=makeup&rh=p_8%3A30-99", "💄 Makeup - عام", 'search'),
-    ("https://www.amazon.sa/s?k=skincare&rh=p_8%3A30-99", "💆 Skincare - عام", 'search'),
-    ("https://www.amazon.sa/s?k=bag&rh=p_8%3A30-99", "🎒 Bag - عام", 'search'),
-    ("https://www.amazon.sa/s?k=wallet&rh=p_8%3A30-99", "👛 Wallet - عام", 'search'),
-    
-    # 🧱🧱🧱 TOYS - الأكثر مبيعاً (الأقسام 310-329)
+
+    # 🧱 TOYS
     ("https://www.amazon.sa/s?k=lego+technic&rh=p_8%3A30-99", "🧱 LEGO Technic", 'search'),
     ("https://www.amazon.sa/s?k=lego+star+wars&rh=p_8%3A30-99", "🧱 LEGO Star Wars", 'search'),
-    ("https://www.amazon.sa/s?k=lego+icons&rh=p_8%3A30-99", "🧱 LEGO Icons", 'search'),
-    ("https://www.amazon.sa/s?k=lego+harry+potter&rh=p_8%3A30-99", "🧱 LEGO Harry Potter", 'search'),
-    ("https://www.amazon.sa/s?k=lego+marvel&rh=p_8%3A30-99", "🧱 LEGO Marvel", 'search'),
-    ("https://www.amazon.sa/s?k=lego+disney&rh=p_8%3A30-99", "🧱 LEGO Disney", 'search'),
     ("https://www.amazon.sa/s?k=barbie+dreamhouse&rh=p_8%3A30-99", "👸 Barbie DreamHouse", 'search'),
-    ("https://www.amazon.sa/s?k=barbie+extra&rh=p_8%3A30-99", "👸 Barbie Extra", 'search'),
     ("https://www.amazon.sa/s?k=hot+wheels+track&rh=p_8%3A30-99", "🚗 Hot Wheels Track", 'search'),
-    ("https://www.amazon.sa/s?k=hot+wheels+premium&rh=p_8%3A30-99", "🚗 Hot Wheels Premium", 'search'),
     ("https://www.amazon.sa/s?k=nerf+gun&rh=p_8%3A30-99", "🔫 Nerf Gun", 'search'),
-    ("https://www.amazon.sa/s?k=nerf+rival&rh=p_8%3A30-99", "🔫 Nerf Rival", 'search'),
-    ("https://www.amazon.sa/s?k=playmobil&rh=p_8%3A30-99", "🏰 Playmobil", 'search'),
-    ("https://www.amazon.sa/s?k=playdoh&rh=p_8%3A30-99", "🎨 Play-Doh", 'search'),
-    ("https://www.amazon.sa/s?k=hasbro+games&rh=p_8%3A30-99", "🎲 Hasbro Games", 'search'),
-    ("https://www.amazon.sa/s?k=monopoly&rh=p_8%3A30-99", "🎲 Monopoly", 'search'),
-    ("https://www.amazon.sa/s?k=scrabble&rh=p_8%3A30-99", "🎲 Scrabble", 'search'),
-    ("https://www.amazon.sa/s?k=jenga&rh=p_8%3A30-99", "🎲 Jenga", 'search'),
-    ("https://www.amazon.sa/s?k=uno&rh=p_8%3A30-99", "🎲 UNO", 'search'),
-    ("https://www.amazon.sa/s?k=rubik%27s+cube&rh=p_8%3A30-99", "🎲 Rubik's Cube", 'search'),
-    
-    # 💎💎💎 JEWELRY - بديل Storage (الأقسام 330-349)
+
+    # 💎 JEWELRY & WATCHES
     ("https://www.amazon.sa/s?k=swarovski&rh=p_8%3A30-99", "💎 Swarovski", 'search'),
     ("https://www.amazon.sa/s?k=pandora&rh=p_8%3A30-99", "💎 Pandora", 'search'),
-    ("https://www.amazon.sa/s?k=tiffany&rh=p_8%3A30-99", "💎 Tiffany", 'search'),
-    ("https://www.amazon.sa/s?k=cartier&rh=p_8%3A30-99", "💎 Cartier", 'search'),
-    ("https://www.amazon.sa/s?k=bulgari&rh=p_8%3A30-99", "💎 Bvlgari", 'search'),
-    ("https://www.amazon.sa/s?k=chopard&rh=p_8%3A30-99", "💎 Chopard", 'search'),
-    ("https://www.amazon.sa/s?k=apm+monaco&rh=p_8%3A30-99", "💎 APM Monaco", 'search'),
-    ("https://www.amazon.sa/s?k=maison+margiela&rh=p_8%3A30-99", "💎 Maison Margiela", 'search'),
-    ("https://www.amazon.sa/s?k=mejuri&rh=p_8%3A30-99", "💎 Mejuri", 'search'),
-    ("https://www.amazon.sa/s?k=missoma&rh=p_8%3A30-99", "💎 Missoma", 'search'),
-    ("https://www.amazon.sa/s?k=anita+ko&rh=p_8%3A30-99", "💎 Anita Ko", 'search'),
-    ("https://www.amazon.sa/s?k=alighieri&rh=p_8%3A30-99", "💎 Alighieri", 'search'),
-    ("https://www.amazon.sa/s?k=monica+vinader&rh=p_8%3A30-99", "💎 Monica Vinader", 'search'),
-    ("https://www.amazon.sa/s?k=astley+clarke&rh=p_8%3A30-99", "💎 Astley Clarke", 'search'),
-    ("https://www.amazon.sa/s?k=edge+of+ember&rh=p_8%3A30-99", "💎 Edge of Ember", 'search'),
-    ("https://www.amazon.sa/s?k=ti+sento&rh=p_8%3A30-99", "💎 Ti Sento", 'search'),
-    ("https://www.amazon.sa/s?k=thomas+sabo&rh=p_8%3A30-99", "💎 Thomas Sabo", 'search'),
-    ("https://www.amazon.sa/s?k=links+of+london&rh=p_8%3A30-99", "💎 Links of London", 'search'),
-    ("https://www.amazon.sa/s?k=chlo%C3%A9+jewelry&rh=p_8%3A30-99", "💎 Chloé Jewelry", 'search'),
-    ("https://www.amazon.sa/s?k=kate+spade+jewelry&rh=p_8%3A30-99", "💎 Kate Spade Jewelry", 'search'),
-    
-    # ⌚⌚⌚ WATCHES - بديل E-Readers (الأقسام 350-369)
-    ("https://www.amazon.sa/s?k=apple+watch+ultra&rh=p_8%3A30-99", "⌚ Apple Watch Ultra", 'search'),
-    ("https://www.amazon.sa/s?k=garmin+fenix+7&rh=p_8%3A30-99", "⌚ Garmin Fenix 7", 'search'),
-    ("https://www.amazon.sa/s?k=garmin+epix&rh=p_8%3A30-99", "⌚ Garmin Epix", 'search'),
-    ("https://www.amazon.sa/s?k=garmin+forerunner&rh=p_8%3A30-99", "⌚ Garmin Forerunner", 'search'),
-    ("https://www.amazon.sa/s?k=suunto&rh=p_8%3A30-99", "⌚ Suunto", 'search'),
-    ("https://www.amazon.sa/s?k=polar+vantage&rh=p_8%3A30-99", "⌚ Polar Vantage", 'search'),
-    ("https://www.amazon.sa/s?k=fitbit+sense&rh=p_8%3A30-99", "⌚ Fitbit Sense", 'search'),
-    ("https://www.amazon.sa/s?k=huawei+watch+gt+4&rh=p_8%3A30-99", "⌚ Huawei Watch GT 4", 'search'),
-    ("https://www.amazon.sa/s?k=fossil+gen+6&rh=p_8%3A30-99", "⌚ Fossil Gen 6", 'search'),
-    ("https://www.amazon.sa/s?k=tissot&rh=p_8%3A30-99", "⌚ Tissot", 'search'),
     ("https://www.amazon.sa/s?k=casio+g+shock&rh=p_8%3A30-99", "⌚ Casio G-Shock", 'search'),
-    ("https://www.amazon.sa/s?k=casio+edifice&rh=p_8%3A30-99", "⌚ Casio Edifice", 'search'),
-    ("https://www.amazon.sa/s?k=seiko&rh=p_8%3A30-99", "⌚ Seiko", 'search'),
-    ("https://www.amazon.sa/s?k=citizen+eco+drive&rh=p_8%3A30-99", "⌚ Citizen Eco-Drive", 'search'),
-    ("https://www.amazon.sa/s?k=orient+watch&rh=p_8%3A30-99", "⌚ Orient", 'search'),
-    ("https://www.amazon.sa/s?k=hamilton+watch&rh=p_8%3A30-99", "⌚ Hamilton", 'search'),
-    ("https://www.amazon.sa/s?k=movado&rh=p_8%3A30-99", "⌚ Movado", 'search'),
-    ("https://www.amazon.sa/s?k=tag+heuer&rh=p_8%3A30-99", "⌚ TAG Heuer", 'search'),
-    ("https://www.amazon.sa/s?k=omega&rh=p_8%3A30-99", "⌚ Omega", 'search'),
-    ("https://www.amazon.sa/s?k=rolex&rh=p_8%3A30-99", "⌚ Rolex", 'search'),
-    
-    # 🕶️🕶️🕶️ SUNGLASSES (الأقسام 370-389)
-    ("https://www.amazon.sa/s?k=ray+ban+aviator&rh=p_8%3A30-99", "🕶️ Ray-Ban Aviator", 'search'),
-    ("https://www.amazon.sa/s?k=ray+ban+wayfarer&rh=p_8%3A30-99", "🕶️ Ray-Ban Wayfarer", 'search'),
-    ("https://www.amazon.sa/s?k=oakley+holbrook&rh=p_8%3A30-99", "🕶️ Oakley Holbrook", 'search'),
-    ("https://www.amazon.sa/s?k=prada+sunglasses&rh=p_8%3A30-99", "🕶️ Prada", 'search'),
-    ("https://www.amazon.sa/s?k=gucci+sunglasses&rh=p_8%3A30-99", "🕶️ Gucci", 'search'),
-    ("https://www.amazon.sa/s?k=versace+sunglasses&rh=p_8%3A30-99", "🕶️ Versace", 'search'),
-    ("https://www.amazon.sa/s?k=burberry+sunglasses&rh=p_8%3A30-99", "🕶️ Burberry", 'search'),
-    ("https://www.amazon.sa/s?k=persol&rh=p_8%3A30-99", "🕶️ Persol", 'search'),
-    ("https://www.amazon.sa/s?k=maui+jim&rh=p_8%3A30-99", "🕶️ Maui Jim", 'search'),
-    ("https://www.amazon.sa/s?k=coach+sunglasses&rh=p_8%3A30-99", "🕶️ Coach", 'search'),
-    ("https://www.amazon.sa/s?k=michael+kors+sunglasses&rh=p_8%3A30-99", "🕶️ Michael Kors", 'search'),
-    ("https://www.amazon.sa/s?k=tom+ford+sunglasses&rh=p_8%3A30-99", "🕶️ Tom Ford", 'search'),
-    ("https://www.amazon.sa/s?k=dior+sunglasses&rh=p_8%3A30-99", "🕶️ Dior", 'search'),
-    ("https://www.amazon.sa/s?k=fendi+sunglasses&rh=p_8%3A30-99", "🕶️ Fendi", 'search'),
-    ("https://www.amazon.sa/s?k=armani+sunglasses&rh=p_8%3A30-99", "🕶️ Armani", 'search'),
-    ("https://www.amazon.sa/s?k=balenciaga+sunglasses&rh=p_8%3A30-99", "🕶️ Balenciaga", 'search'),
-    ("https://www.amazon.sa/s?k=celine+sunglasses&rh=p_8%3A30-99", "🕶️ Celine", 'search'),
-    ("https://www.amazon.sa/s?k=loewe+sunglasses&rh=p_8%3A30-99", "🕶️ Loewe", 'search'),
-    ("https://www.amazon.sa/s?k=jacques+marie+mage&rh=p_8%3A30-99", "🕶️ Jacques Marie Mage", 'search'),
-    ("https://www.amazon.sa/s?k=linda+farrow&rh=p_8%3A30-99", "🕶️ Linda Farrow", 'search'),
-    
-    # 👟👟👟 SHOES - بديل Audio (الأقسام 390-409)
+    ("https://www.amazon.sa/s?k=garmin+fenix+7&rh=p_8%3A30-99", "⌚ Garmin Fenix 7", 'search'),
+    ("https://www.amazon.sa/s?k=tissot&rh=p_8%3A30-99", "⌚ Tissot", 'search'),
+
+    # 👟 SHOES & BAGS
     ("https://www.amazon.sa/s?k=nike+air+jordan&rh=p_8%3A30-99", "👟 Nike Air Jordan", 'search'),
-    ("https://www.amazon.sa/s?k=nike+dunk&rh=p_8%3A30-99", "👟 Nike Dunk", 'search'),
-    ("https://www.amazon.sa/s?k=nike+air+force&rh=p_8%3A30-99", "👟 Nike Air Force", 'search'),
-    ("https://www.amazon.sa/s?k=nike+air+max&rh=p_8%3A30-99", "👟 Nike Air Max", 'search'),
     ("https://www.amazon.sa/s?k=adidas+ultraboost&rh=p_8%3A30-99", "👟 Adidas Ultraboost", 'search'),
-    ("https://www.amazon.sa/s?k=adidas+yeezy&rh=p_8%3A30-99", "👟 Adidas Yeezy", 'search'),
-    ("https://www.amazon.sa/s?k=adidas+samba&rh=p_8%3A30-99", "👟 Adidas Samba", 'search'),
-    ("https://www.amazon.sa/s?k=new+balance+990&rh=p_8%3A30-99", "👟 New Balance 990", 'search'),
-    ("https://www.amazon.sa/s?k=new+balance+550&rh=p_8%3A30-99", "👟 New Balance 550", 'search'),
-    ("https://www.amazon.sa/s?k=asics+gel+kayano&rh=p_8%3A30-99", "👟 ASICS Gel Kayano", 'search'),
-    ("https://www.amazon.sa/s?k=asics+gel+lyte&rh=p_8%3A30-99", "👟 ASICS Gel Lyte", 'search'),
     ("https://www.amazon.sa/s?k=hoka&rh=p_8%3A30-99", "👟 HOKA", 'search'),
-    ("https://www.amazon.sa/s?k=on+running&rh=p_8%3A30-99", "👟 On Running", 'search'),
-    ("https://www.amazon.sa/s?k=salomon&rh=p_8%3A30-99", "👟 Salomon", 'search'),
-    ("https://www.amazon.sa/s?k=merrell&rh=p_8%3A30-99", "👟 Merrell", 'search'),
-    ("https://www.amazon.sa/s?k=keen&rh=p_8%3A30-99", "👟 Keen", 'search'),
-    ("https://www.amazon.sa/s?k=teva&rh=p_8%3A30-99", "👟 Teva", 'search'),
     ("https://www.amazon.sa/s?k=birkenstock&rh=p_8%3A30-99", "👟 Birkenstock", 'search'),
-    ("https://www.amazon.sa/s?k=crocs&rh=p_8%3A30-99", "👟 Crocs", 'search'),
-    ("https://www.amazon.sa/s?k=ugg&rh=p_8%3A30-99", "👟 UGG", 'search'),
-    
-    # 🎒🎒🎒 BAGS - بديل Cameras (الأقسام 410-429)
     ("https://www.amazon.sa/s?k=tumi&rh=p_8%3A30-99", "🎒 TUMI", 'search'),
-    ("https://www.amazon.sa/s?k=samsonite+black+label&rh=p_8%3A30-99", "🎒 Samsonite Black Label", 'search'),
     ("https://www.amazon.sa/s?k=rimowa&rh=p_8%3A30-99", "🎒 Rimowa", 'search'),
-    ("https://www.amazon.sa/s?k=away+luggage&rh=p_8%3A30-99", "🎒 Away", 'search'),
-    ("https://www.amazon.sa/s?k=bellroy&rh=p_8%3A30-99", "🎒 Bellroy", 'search'),
-    ("https://www.amazon.sa/s?k=nomatic&rh=p_8%3A30-99", "🎒 Nomatic", 'search'),
-    ("https://www.amazon.sa/s?k=peak+design&rh=p_8%3A30-99", "🎒 Peak Design", 'search'),
-    ("https://www.amazon.sa/s?k=lowepro&rh=p_8%3A30-99", "🎒 Lowepro", 'search'),
-    ("https://www.amazon.sa/s?k=herschel&rh=p_8%3A30-99", "🎒 Herschel", 'search'),
-    ("https://www.amazon.sa/s?k=fjallraven&rh=p_8%3A30-99", "🎒 Fjällräven", 'search'),
-    ("https://www.amazon.sa/s?k=patagonia+backpack&rh=p_8%3A30-99", "🎒 Patagonia", 'search'),
-    ("https://www.amazon.sa/s?k=north+face+backpack&rh=p_8%3A30-99", "🎒 The North Face", 'search'),
-    ("https://www.amazon.sa/s?k=osprey&rh=p_8%3A30-99", "🎒 Osprey", 'search'),
-    ("https://www.amazon.sa/s?k=deuter&rh=p_8%3A30-99", "🎒 Deuter", 'search'),
-    ("https://www.amazon.sa/s?k=gregory&rh=p_8%3A30-99", "🎒 Gregory", 'search'),
-    ("https://www.amazon.sa/s?k=mystery+ranch&rh=p_8%3A30-99", "🎒 Mystery Ranch", 'search'),
-    ("https://www.amazon.sa/s?k=goruck&rh=p_8%3A30-99", "🎒 GORUCK", 'search'),
-    ("https://www.amazon.sa/s?k=tortuga&rh=p_8%3A30-99", "🎒 Tortuga", 'search'),
-    ("https://www.amazon.sa/s?k=everki&rh=p_8%3A30-99", "🎒 Everki", 'search'),
-    ("https://www.amazon.sa/s?k=incase&rh=p_8%3A30-99", "🎒 Incase", 'search'),
-    
-    # 📚📚📚 BOOKS - بديل Bath & Body (الأقسام 430-449)
+
+    # 📚 BOOKS & AMAZON DEVICES
     ("https://www.amazon.sa/s?k=kindle+paperwhite&rh=p_8%3A30-99", "📚 Kindle Paperwhite", 'search'),
-    ("https://www.amazon.sa/s?k=kindle+scribe&rh=p_8%3A30-99", "📚 Kindle Scribe", 'search'),
-    ("https://www.amazon.sa/s?k=kindle+colorsoft&rh=p_8%3A30-99", "📚 Kindle Colorsoft", 'search'),
     ("https://www.amazon.sa/s?k=echo+dot&rh=p_8%3A30-99", "🔊 Echo Dot", 'search'),
-    ("https://www.amazon.sa/s?k=echo+spot&rh=p_8%3A30-99", "🔊 Echo Spot", 'search'),
-    ("https://www.amazon.sa/s?k=echo+show&rh=p_8%3A30-99", "🔊 Echo Show", 'search'),
-    ("https://www.amazon.sa/s?k=echo+pop&rh=p_8%3A30-99", "🔊 Echo Pop", 'search'),
     ("https://www.amazon.sa/s?k=fire+tv+stick&rh=p_8%3A30-99", "📺 Fire TV Stick", 'search'),
-    ("https://www.amazon.sa/s?k=fire+tv+cube&rh=p_8%3A30-99", "📺 Fire TV Cube", 'search'),
-    ("https://www.amazon.sa/s?k=fire+hd+tablet&rh=p_8%3A30-99", "📱 Fire HD Tablet", 'search'),
-    ("https://www.amazon.sa/s?k=book+arabic+bestseller&rh=p_8%3A30-99", "📚 Arabic Bestsellers", 'search'),
-    ("https://www.amazon.sa/s?k=quran+english&rh=p_8%3A30-99", "📚 Quran English", 'search'),
-    ("https://www.amazon.sa/s?k=islamic+books&rh=p_8%3A30-99", "📚 Islamic Books", 'search'),
-    ("https://www.amazon.sa/s?k=self+help+books&rh=p_8%3A30-99", "📚 Self Help Books", 'search'),
-    ("https://www.amazon.sa/s?k=business+books&rh=p_8%3A30-99", "📚 Business Books", 'search'),
-    ("https://www.amazon.sa/s?k=cookbook&rh=p_8%3A30-99", "📚 Cookbooks", 'search'),
-    ("https://www.amazon.sa/s?k=children+books+arabic&rh=p_8%3A30-99", "📚 Children Books Arabic", 'search'),
-    ("https://www.amazon.sa/s?k=coloring+book+adult&rh=p_8%3A30-99", "📚 Adult Coloring Books", 'search'),
-    ("https://www.amazon.sa/s?k=journal+premium&rh=p_8%3A30-99", "📚 Premium Journals", 'search'),
-    ("https://www.amazon.sa/s?k=planner+2026&rh=p_8%3A30-99", "📚 Planner 2026", 'search'),
-    
-    # 🖊️🖊️🖊️ OFFICE & STATIONERY - بديل Storage (الأقسام 450-469)
-    ("https://www.amazon.sa/s?k=montblanc&rh=p_8%3A30-99", "🖊️ Montblanc", 'search'),
-    ("https://www.amazon.sa/s?k=parker+duofold&rh=p_8%3A30-99", "🖊️ Parker Duofold", 'search'),
-    ("https://www.amazon.sa/s?k=pelikan+m800&rh=p_8%3A30-99", "🖊️ Pelikan M800", 'search'),
-    ("https://www.amazon.sa/s?k=lamy+2000&rh=p_8%3A30-99", "🖊️ Lamy 2000", 'search'),
-    ("https://www.amazon.sa/s?k=visconti&rh=p_8%3A30-99", "🖊️ Visconti", 'search'),
-    ("https://www.amazon.sa/s?k=sailor+pen&rh=p_8%3A30-99", "🖊️ Sailor", 'search'),
-    ("https://www.amazon.sa/s?k=platinum+3776&rh=p_8%3A30-99", "🖊️ Platinum 3776", 'search'),
-    ("https://www.amazon.sa/s?k=rhodia&rh=p_8%3A30-99", "📓 Rhodia", 'search'),
-    ("https://www.amazon.sa/s?k=moleskine&rh=p_8%3A30-99", "📓 Moleskine", 'search'),
-    ("https://www.amazon.sa/s?k=leuchtturm1917&rh=p_8%3A30-99", "📓 Leuchtturm1917", 'search'),
-    ("https://www.amazon.sa/s?k=field+notes&rh=p_8%3A30-99", "📓 Field Notes", 'search'),
-    ("https://www.amazon.sa/s?k=baron+fig&rh=p_8%3A30-99", "📓 Baron Fig", 'search'),
-    ("https://www.amazon.sa/s?k=lamy+notebook&rh=p_8%3A30-99", "📓 Lamy Notebook", 'search'),
-    ("https://www.amazon.sa/s?k=clairefontaine&rh=p_8%3A30-99", "📓 Clairefontaine", 'search'),
-    ("https://www.amazon.sa/s?k=maruman&rh=p_8%3A30-99", "📓 Maruman", 'search'),
-    ("https://www.amazon.sa/s?k=kokuyo&rh=p_8%3A30-99", "📓 Kokuyo", 'search'),
-    ("https://www.amazon.sa/s?k=midori&rh=p_8%3A30-99", "📓 Midori", 'search'),
-    ("https://www.amazon.sa/s?k=traveler%27s+notebook&rh=p_8%3A30-99", "📓 Traveler's Notebook", 'search'),
-    ("https://www.amazon.sa/s?k=hobonichi&rh=p_8%3A30-99", "📓 Hobonichi", 'search'),
-    ("https://www.amazon.sa/s?k=stabilo&rh=p_8%3A30-99", "🖊️ Stabilo", 'search'),
 ]
 
-# متغير لتتبع الصفحات
+# ================== Trending Tracker ==================
+# يتتبع الـ trending خلال كل دورة بحث
+trending_tracker = defaultdict(lambda: {
+    'title': '',
+    'price': 0,
+    'old_price': 0,
+    'discount': 0,
+    'rating': 0,
+    'reviews': 0,
+    'link': '',
+    'category': '',
+    'score': 0   # trending score = reviews * rating * (1 + discount/100)
+})
+
 last_page_tracker = {cat[1]: 0 for cat in CATEGORIES_DEF}
+
 
 # ================== Health Server ==================
 class HealthHandler(BaseHTTPRequestHandler):
@@ -590,6 +287,7 @@ def run_health_server():
         except Exception as e:
             logger.error(f"Health error: {e}")
             time.sleep(3)
+
 
 # ================== Database ==================
 def load_database():
@@ -618,6 +316,7 @@ def save_database():
             }, f)
     except Exception as e:
         logger.error(f"DB Save Error: {e}")
+
 
 # ================== أدوات ==================
 def extract_asin(link):
@@ -648,13 +347,23 @@ def get_product_id(title, link, price):
 def get_page_url(base_url, page_num):
     if page_num <= 1:
         return base_url
-    
     if 'page=' in base_url:
         return re.sub(r'page=\d+', f'page={page_num}', base_url)
     elif 's?' in base_url:
         return f"{base_url}&page={page_num}"
     else:
         return f"{base_url}?page={page_num}"
+
+def calc_trending_score(reviews, rating, discount):
+    """
+    🔥 Trending Score:
+    - مراجعات كتير = شعبي
+    - تقييم عالي = موثوق
+    - خصم = جذاب
+    Score = reviews × rating × (1 + discount/100)
+    """
+    return reviews * rating * (1 + discount / 100)
+
 
 # ================== Scraper ==================
 def create_session():
@@ -704,14 +413,14 @@ def parse_item(item, category, is_best_seller=False):
                         break
                 except:
                     pass
-        
+
         if not price or price <= 0:
             return None
-        
+
         # السعر القديم والخصم
         old_price = 0
         discount = 0
-        
+
         old_el = item.find('span', class_='a-text-price')
         if old_el:
             txt = old_el.get_text()
@@ -723,16 +432,15 @@ def parse_item(item, category, is_best_seller=False):
                         discount = int(((old_price - price) / old_price) * 100)
                 except:
                     pass
-        
-        # لو مفيش خصم محسوب، ندور على نسبة مكتوبة
+
         if discount == 0:
             badge = item.find(string=re.compile(r'(\d+)%'))
             if badge:
                 match = re.search(r'(\d+)', str(badge))
                 if match:
                     discount = int(match.group())
-                    old_price = price / (1 - discount/100)
-        
+                    old_price = price / (1 - discount / 100)
+
         # العنوان
         title = "Unknown"
         for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.a-size-medium']:
@@ -741,7 +449,7 @@ def parse_item(item, category, is_best_seller=False):
                 title = el.text.strip()
                 if len(title) > 5:
                     break
-        
+
         # اللينك
         link = ""
         a = item.find('a', href=True)
@@ -755,237 +463,317 @@ def parse_item(item, category, is_best_seller=False):
                 asin = extract_asin(href)
                 if asin:
                     link = f"https://www.amazon.sa/dp/{asin}"
-        
+
         # التقييم
         rating = 0
         rate_el = item.find('span', class_='a-icon-alt')
         if rate_el:
             rating = parse_rating(rate_el.text)
-        
-        # المراجعات
+
+        # المراجعات ✅ مهم للترندينج
         reviews = 0
-        rev_el = item.find('span', class_='a-size-base')
-        if rev_el:
-            match = re.search(r'[\d,]+', rev_el.text)
-            if match:
-                try:
-                    reviews = int(match.group().replace(',', ''))
-                except:
-                    pass
-        
+        for rev_sel in ['span[data-component-type="s-client-side-analytics"]', '.a-size-base', '.a-size-small']:
+            rev_el = item.find('span', class_='a-size-base')
+            if rev_el:
+                match = re.search(r'[\d,]+', rev_el.text)
+                if match:
+                    try:
+                        reviews = int(match.group().replace(',', ''))
+                        if reviews > 0:
+                            break
+                    except:
+                        pass
+
+        # ✅ Trending Score
+        score = calc_trending_score(reviews, rating, discount)
+
         return {
             'title': title[:120],
             'price': price,
-            'old_price': round(old_price, 2) if old_price > 0 else round(price * 100 / (100 - discount), 2),
+            'old_price': round(old_price, 2) if old_price > 0 else round(price * 100 / (100 - discount), 2) if discount > 0 else price,
             'discount': discount,
             'rating': rating,
             'reviews': reviews,
             'link': link,
             'category': category,
             'is_best_seller': is_best_seller,
+            'score': score,
             'id': get_product_id(title, link, price)
         }
-        
+
     except Exception as e:
         return None
 
+
+# ================== Main Search ==================
 def search_all_deals(chat_id=None, status_msg_id=None):
-    """
-    ✅ يخلص القسم كله (كل الصفحات) ويطلع كل العروض اللي فيه
-    ❌ ملغي: مفيش عدد محدد 20 منتج
-    """
-    global last_page_tracker
-    
+    global last_page_tracker, trending_tracker
+
+    # ✅ نصفي الترندينج كل دورة
+    trending_tracker = defaultdict(lambda: {
+        'title': '', 'price': 0, 'old_price': 0, 'discount': 0,
+        'rating': 0, 'reviews': 0, 'link': '', 'category': '', 'score': 0
+    })
+
     all_deals = []
     session = create_session()
-    
-    # ✅ خلط عشوائي للأقسام
+
     cats = list(CATEGORIES_DEF)
     random.shuffle(cats)
-    
+
     logger.info(f"🚀 Starting search in {len(cats)} categories...")
-    
+
     page_counter = 0
-    
+
     for base_url, cat_name, cat_type in cats:
-        # ✅ نبدأ من آخر صفحة + 1
         start_page = last_page_tracker.get(cat_name, 0) + 1
-        
-        # ✅ ندور في كل صفحات القسم (مفيش حد أقصى)
-        for page_num in range(start_page, start_page + 20):  # 20 صفحة من كل قسم
+
+        for page_num in range(start_page, start_page + 20):
             page_counter += 1
-            
-            # ✅ بناء الرابط
+
             if cat_type in ['best_sellers', 'deals', 'warehouse', 'coupons', 'lightning', 'today', 'outlet']:
-                if '?' in base_url:
-                    url = f"{base_url}&page={page_num}"
-                else:
-                    url = f"{base_url}?page={page_num}"
+                url = f"{base_url}?page={page_num}" if '?' not in base_url else f"{base_url}&page={page_num}"
             else:
                 url = get_page_url(base_url, page_num)
-            
-            logger.info(f"🔍 [{cat_name}] Page {page_num} | Total found: {len(all_deals)}")
-            
-            # ✅ تحديث رسالة الحالة كل 10 صفحات
+
+            logger.info(f"🔍 [{cat_name}] Page {page_num} | Deals: {len(all_deals)}")
+
             if chat_id and status_msg_id and page_counter % 10 == 0:
                 try:
                     updater.bot.edit_message_text(
                         chat_id=chat_id,
                         message_id=status_msg_id,
-                        text=f"🔍 *جاري البحث...*\n\n📄 صفحات تم البحث فيها: {page_counter}\n✅ منتجات تم العثور عليها: {len(all_deals)}\n⏳ جاري البحث في: {cat_name}",
+                        text=(
+                            f"🔍 *جاري البحث...*\n\n"
+                            f"📄 صفحات: {page_counter}\n"
+                            f"✅ عروض: {len(all_deals)}\n"
+                            f"⏳ قسم: {cat_name}"
+                        ),
                         parse_mode='Markdown'
                     )
                 except:
                     pass
-            
+
             html = fetch_page(session, url)
             if not html:
                 continue
-            
+
             soup = BeautifulSoup(html, 'html.parser')
-            
-            # ✅ كل أنواع الـ selectors
+
             items = []
             if cat_type == 'best_sellers':
                 items.extend(soup.find_all('li', class_='zg-item-immersion'))
                 items.extend(soup.find_all('div', class_='p13n-sc-uncoverable-faceout'))
-            
+
             items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
             items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
             items.extend(soup.find_all('div', class_='s-result-item'))
-            
-            logger.info(f"   Found {len(items)} items")
-            
-            # ✅ لو الصفحة فاضية، نوقف القسم ده ونروح للقسم اللي بعده
+
             if len(items) == 0:
-                logger.info(f"   ⛔ Empty page, moving to next category")
+                logger.info(f"   ⛔ Empty page, next category")
                 break
-            
+
             for item in items:
                 try:
                     deal = parse_item(item, cat_name, cat_type == 'best_sellers')
-                    
-                    # ✅ شروط الصفقة
-                    if deal and deal['discount'] >= MIN_DISCOUNT and deal['rating'] >= MIN_RATING:
+                    if not deal:
+                        continue
+
+                    # ✅ تسجيل الترندينج لكل منتج عنده مراجعات حتى بدون خصم كبير
+                    if deal['reviews'] >= TRENDING_MIN_REVIEWS and deal['rating'] >= TRENDING_MIN_RATING:
+                        pid = deal['id']
+                        if deal['score'] > trending_tracker[pid]['score']:
+                            trending_tracker[pid] = deal.copy()
+
+                    # ✅ العروض العادية: خصم 40%+
+                    if deal['discount'] >= MIN_DISCOUNT and deal['rating'] >= MIN_RATING:
                         if deal['id'] not in sent_products and not is_similar_product(deal['title']):
                             all_deals.append(deal)
-                            logger.info(f"✅ ADDED: {deal['title'][:40]} | {deal['discount']}% | {deal['rating']}★")
-                            
+                            logger.info(f"✅ DEAL: {deal['title'][:40]} | {deal['discount']}% | ⭐{deal['rating']}")
+
                 except:
                     continue
-            
-            # ✅ تحديث آخر صفحة
+
             last_page_tracker[cat_name] = page_num
-            
             time.sleep(random.uniform(1, 2))
-        
-        # ✅ بعد ما نخلص القسم، نبعت العروض اللي لقيناها
-        if len(all_deals) > 0:
+
+        # ✅ بعت العروض من كل قسم على طول
+        if all_deals:
             logger.info(f"📤 Sending {len(all_deals)} deals from {cat_name}")
             filter_and_send_deals(all_deals, chat_id)
-            all_deals = []  # نفضي الليست عشان القسم اللي جاي
-    
+            all_deals = []
+
+    # ✅ في النهاية: ابعت تقرير الترندينج
+    send_trending_report(chat_id)
+
     save_database()
-    logger.info(f"🎯 Search complete! Total deals sent")
-    return all_deals
+    logger.info("🎯 Search complete!")
+
 
 def filter_and_send_deals(deals, chat_id):
-    """
-    ✅ يبعت العروض مرتبة: السوبر (90%+) الأول
-    """
     if not deals:
         return
-    
-    # ✅ فصل العروض
+
     super_deals = [d for d in deals if d['discount'] >= 90]
     normal_deals = [d for d in deals if d['discount'] < 90]
-    
-    logger.info(f"🚨 Super deals (90%+): {len(super_deals)}")
-    logger.info(f"🔥 Normal deals (40-89%): {len(normal_deals)}")
-    
-    # ✅ رسالة السوبر ديلز (90%+)
+
+    logger.info(f"🚨 Super: {len(super_deals)} | 🔥 Normal: {len(normal_deals)}")
+
+    # 🚨 السوبر ديلز (90%+)
     if super_deals:
         msg = "🚨🚨🚨 *عروض خرافية 90%+* 🚨🚨🚨\n\n"
-        
         for i, d in enumerate(super_deals, 1):
-            savings = d['old_price'] - d['price'] if d['old_price'] > 0 else 0
-            
+            savings = d['old_price'] - d['price'] if d['old_price'] > d['price'] else 0
             msg += f"*{i}. {d['title'][:50]}*\n"
             msg += f"💰 {d['price']:.0f} ريال ~~{d['old_price']:.0f}~~\n"
             msg += f"🔥🔥🔥 خصم: *{d['discount']}%* (توفر {savings:.0f} ريال)\n"
-            msg += f"⭐ {d['rating']}/5 | 🏷️ {d['category']}\n"
+            msg += f"⭐ {d['rating']}/5 | 💬 {d['reviews']:,} مراجعة\n"
+            msg += f"🏷️ {d['category']}\n"
             msg += f"🔗 [اشتري بسرعة]({d['link']})\n\n"
-        
+
         try:
             updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
         except Exception as e:
             logger.error(f"Super send error: {e}")
-        
         time.sleep(1)
-    
-    # ✅ رسالة العروض العادية (40-89%)
+
+    # 🔥 العروض العادية (40-89%)
     if normal_deals:
         msg = f"🔥 *عروض رهيبة 40%+* ({len(normal_deals)} منتج)\n\n"
-        
+        count = 0
         for i, d in enumerate(normal_deals, 1):
             if d['id'] in sent_products:
                 continue
-            
-            savings = d['old_price'] - d['price'] if d['old_price'] > 0 else 0
-            
+            savings = d['old_price'] - d['price'] if d['old_price'] > d['price'] else 0
             msg += f"*{i}. {d['title'][:50]}*\n"
             msg += f"💰 {d['price']:.0f} ريال ~~{d['old_price']:.0f}~~ (توفر {savings:.0f})\n"
-            msg += f"📉 خصم: *{d['discount']}%* | ⭐ {d['rating']}/5\n"
-            msg += f"🏷️ {d['category']}\n"
+            msg += f"📉 خصم: *{d['discount']}%* | ⭐ {d['rating']}/5"
+            if d['reviews'] > 0:
+                msg += f" | 💬 {d['reviews']:,}"
+            msg += f"\n🏷️ {d['category']}\n"
             msg += f"🔗 [اشتري من هنا]({d['link']})\n\n"
-            
-            # ✅ نبعت كل 5 منتجات
-            if i % 5 == 0 or i == len(normal_deals):
+            count += 1
+
+            if count % 5 == 0 or i == len(normal_deals):
                 try:
                     updater.bot.send_message(
-                        chat_id=chat_id, 
-                        text=msg, 
+                        chat_id=chat_id,
+                        text=msg,
                         parse_mode='Markdown',
                         disable_web_page_preview=True
                     )
                     msg = ""
                 except Exception as e:
                     logger.error(f"Send error: {e}")
-                
                 time.sleep(0.5)
-            
+
             sent_products.add(d['id'])
             sent_hashes.add(create_title_hash(d['title']))
-    
-    # ✅ نضيف السوبر للـ sent
+
     for d in super_deals:
         sent_products.add(d['id'])
         sent_hashes.add(create_title_hash(d['title']))
-    
+
     save_database()
+
+
+# ================== 🔥 TRENDING REPORT ==================
+def send_trending_report(chat_id):
+    """
+    📊 تقرير الترندينج:
+    أكتر المنتجات شراءً في المجتمع السعودي
+    مرتبين حسب Trending Score (مراجعات × تقييم × خصم)
+    """
+    if not trending_tracker:
+        return
+
+    # ✅ ترتيب حسب الـ score
+    all_trending = list(trending_tracker.values())
+    all_trending = [p for p in all_trending if p.get('title') and p['title'] != '' and p['link']]
+    all_trending.sort(key=lambda x: x['score'], reverse=True)
+
+    top_trending = all_trending[:20]  # أكتر 20 منتج ترند
+
+    if not top_trending:
+        logger.info("No trending products found")
+        return
+
+    logger.info(f"📊 Sending trending report with {len(top_trending)} products")
+
+    # ✅ رسالة الترندينج
+    msg = (
+        "📊🔥 *أكتر المنتجات شراءً في السعودية* 🇸🇦\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "_مرتبة حسب: مراجعات الشراء × التقييم × الخصم_\n\n"
+    )
+
+    # تقسيم حسب الكاتيجوري
+    by_category = defaultdict(list)
+    for p in top_trending:
+        cat = p.get('category', 'عام')
+        # استخراج الإيموجي والاسم الأساسي من الكاتيجوري
+        short_cat = cat.split(' - ')[0] if ' - ' in cat else cat
+        by_category[short_cat].append(p)
+
+    rank = 1
+    for cat_name, products in list(by_category.items())[:8]:  # أكتر 8 أقسام
+        if not products:
+            continue
+        top_in_cat = products[0]  # الأعلى في القسم
+        savings = top_in_cat['old_price'] - top_in_cat['price'] if top_in_cat['old_price'] > top_in_cat['price'] else 0
+
+        msg += f"*{rank}. {top_in_cat['title'][:55]}*\n"
+        msg += f"   💰 {top_in_cat['price']:.0f} ريال"
+        if top_in_cat['discount'] > 0:
+            msg += f" | 📉 -{top_in_cat['discount']}%"
+        if savings > 0:
+            msg += f" (وفّر {savings:.0f})"
+        msg += f"\n   ⭐ {top_in_cat['rating']}/5 | 💬 {top_in_cat['reviews']:,} مراجعة"
+        msg += f"\n   🏷️ {cat_name}"
+        msg += f"\n   🔗 [تسوق الآن]({top_in_cat['link']})\n\n"
+        rank += 1
+
+    msg += "━━━━━━━━━━━━━━━━━━━━\n"
+    msg += f"📈 *اجمالي منتجات رصدها البوت: {len(all_trending):,}*"
+
+    try:
+        updater.bot.send_message(
+            chat_id=chat_id,
+            text=msg,
+            parse_mode='Markdown',
+            disable_web_page_preview=True
+        )
+        logger.info("✅ Trending report sent!")
+    except Exception as e:
+        logger.error(f"Trending report send error: {e}")
+        # لو الرسالة طويلة أوي، ابعتها على أجزاء
+        try:
+            lines = msg.split('\n\n')
+            chunk = ""
+            for line in lines:
+                if len(chunk) + len(line) < 4000:
+                    chunk += line + "\n\n"
+                else:
+                    updater.bot.send_message(chat_id=chat_id, text=chunk, parse_mode='Markdown', disable_web_page_preview=True)
+                    chunk = line + "\n\n"
+                    time.sleep(0.5)
+            if chunk:
+                updater.bot.send_message(chat_id=chat_id, text=chunk, parse_mode='Markdown', disable_web_page_preview=True)
+        except Exception as e2:
+            logger.error(f"Trending fallback error: {e2}")
+
 
 # ================== أوامر ==================
 def start_cmd(update: Update, context: CallbackContext):
     welcome = """👋 *أهلا بيك في بوت عروض أمازون السعودية!*
 
 🔥 *مميزات البوت:*
-• يدور في *470+ قسم* مختلف
+• يدور في *120+ قسم* مختلف
 • يخلص *كل قسم كامل* (كل الصفحات)
 • خصومات *40%+* | تقييم *3 نجوم+*
 • عروض *90%+* بشكل خاص 🚨
+• *تقرير الترندينج* في نهاية كل بحث 📊
 • مخصص *100% للسوق السعودي* 🇸🇦
-
-✅ *الأقسام الأولى:*
-1️⃣ Best Sellers السعودية
-2️⃣ Deals الرسمية
-3️⃣ Apple & Samsung
-4️⃣ Perfumes & Beauty
-5️⃣ Home & Kitchen
-6️⃣ Fashion & Automotive
-7️⃣ Baby & Sports
-8️⃣ Kitchen Appliances
-9️⃣ Smart Home & Grocery
-🔟 Laptops & Power
 
 اكتب *Hi* عشان تبدأ البحث!"""
     update.message.reply_text(welcome, parse_mode='Markdown')
@@ -998,30 +786,36 @@ def hi_cmd(update: Update, context: CallbackContext):
         return
 
     is_scanning = True
-    
     chat_id = update.effective_chat.id
-    
+
     status_msg = update.message.reply_text(
         "🔍 *بدأت البحث...*\n"
         "📄 بدور في كل الأقسام والصفحات\n"
-        "⏳ *الوقت المتوقع: 10-15 دقيقة*",
+        "⏳ *الوقت المتوقع: 10-15 دقيقة*\n\n"
+        "📊 *في النهاية هبعتلك تقرير أكتر المنتجات شراءً*",
         parse_mode='Markdown'
     )
 
     try:
         search_all_deals(chat_id, status_msg.message_id)
-        
+
         try:
             updater.bot.delete_message(chat_id, status_msg.message_id)
         except:
             pass
-        
+
         updater.bot.send_message(
             chat_id=chat_id,
-            text="✅ *خلصت البحث!*\n\n📦 كل الأقسام اتبحثت\n🔥 العروض اتبعتت لك\n\nاكتب *Hi* عشان تبدأ بحث جديد!",
+            text=(
+                "✅ *خلصت البحث!*\n\n"
+                "📦 كل الأقسام اتبحثت\n"
+                "🔥 العروض اتبعتت لك\n"
+                "📊 تقرير الترندينج اتبعت\n\n"
+                "اكتب *Hi* عشان تبدأ بحث جديد!"
+            ),
             parse_mode='Markdown'
         )
-        
+
     except Exception as e:
         logger.error(f"Error: {e}")
         try:
@@ -1031,7 +825,7 @@ def hi_cmd(update: Update, context: CallbackContext):
                 text=f"❌ حصل خطأ: {str(e)[:100]}\n🔄 جرب تاني!"
             )
         except:
-            update.message.reply_text(f"❌ خطأ: {str(e)[:100]}", parse_mode='Markdown')
+            update.message.reply_text(f"❌ خطأ: {str(e)[:100]}")
     finally:
         is_scanning = False
 
@@ -1043,23 +837,18 @@ def status_cmd(update: Update, context: CallbackContext):
 📁 عدد الأقسام: *{total_cats}*
 📉 الحد الأدنى للخصم: *{MIN_DISCOUNT}%*
 ⭐ الحد الأدنى للتقييم: *{MIN_RATING}*
+📊 معيار الترندينج: *{TRENDING_MIN_REVIEWS}+ مراجعة*
 
 🇸🇦 *مخصص للسوق السعودي*
-
-✅ *الأقسام الأولى:*
-1️⃣ Best Sellers السعودية
-2️⃣ Deals الرسمية
-3️⃣ Apple & Samsung
-4️⃣ Perfumes & Beauty
-5️⃣ Home & Kitchen
 
 اكتب *Hi* عشان تبدأ بحث جديد!"""
     update.message.reply_text(msg, parse_mode='Markdown')
 
+
 # ================== تشغيل ==================
 def start_bot():
     global updater
-    
+
     load_database()
 
     updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
@@ -1071,21 +860,23 @@ def start_bot():
 
     logger.info("🤖 Bot started!")
     logger.info(f"📁 Categories: {len(CATEGORIES_DEF)}")
-    logger.info("🎯 Mode: Full category scan (no limit)")
-    
+    logger.info("🎯 Mode: Full scan + Trending Report")
+
     updater.start_polling(drop_pending_updates=True, timeout=30)
     updater.idle()
+
 
 def main():
     threading.Thread(target=run_health_server, daemon=True).start()
     time.sleep(2)
-    
+
     while True:
         try:
             start_bot()
         except Exception as e:
             logger.error(f"Crash: {e}")
             time.sleep(5)
+
 
 if __name__ == "__main__":
     main()
