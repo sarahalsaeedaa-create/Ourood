@@ -2,662 +2,1078 @@ import os
 import re
 import json
 import logging
+import requests
 import cloudscraper
+from datetime import datetime
 from bs4 import BeautifulSoup
-from telegram import Update
+from telegram import Bot, Update
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from fake_useragent import UserAgent
+from difflib import SequenceMatcher
 import time
 import random
 import hashlib
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from collections import deque
 
-logging.basicConfig(format='%(asctime)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-TELEGRAM_BOT_TOKEN = "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
-PORT = int(os.environ.get("PORT", 10000))
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "432826122")
+PORT = int(os.environ.get("PORT", 8080))
 
 ua = UserAgent()
 sent_products = set()
-sent_hashes   = set()
-is_scanning   = False
-updater       = None
+sent_hashes = set()
+is_scanning = False
+updater = None
 
-MIN_DISCOUNT          = 40
-MIN_RATING            = 3.0
-TRENDING_MIN_REVIEWS  = 300
-TRENDING_MIN_RATING   = 4.0
+# ========== إعدادات البحث ==========
+TARGET_DEALS_COUNT = 40      # عدد النتائج المطلوبة في كل مرة
+MIN_DISCOUNT = 50            # الحد الأدنى للخصم (50%)
+MIN_RATING = 3.5             # الحد الأدنى للتقييم (3.5 نجمة)
 
-# ============================================================
-# ✅ أقسام عامة واسعة = أكبر كم من العروض اليومية
-# ============================================================
-CATEGORIES_DEF = [
-
-    # 🔥 DEALS الرسمية
-    ("https://www.amazon.sa/gp/goldbox",                        "🔥 Goldbox",         'deals'),
-    ("https://www.amazon.sa/gp/todays-deals",                   "📅 Today's Deals",   'deals'),
-    ("https://www.amazon.sa/gp/prime/pipeline/lightning_deals", "⚡ Lightning Deals", 'deals'),
-    ("https://www.amazon.sa/gp/warehouse-deals",                "🏭 Warehouse",       'deals'),
-    ("https://www.amazon.sa/gp/coupons",                        "🎟️ Coupons",         'deals'),
-    ("https://www.amazon.sa/outlet",                            "🎁 Outlet",          'deals'),
-
-    # ⭐ BEST SELLERS
-    ("https://www.amazon.sa/gp/bestsellers",             "⭐ Best Sellers الكل",       'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/electronics", "⭐ Best Sellers Electronics", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/beauty",      "⭐ Best Sellers Beauty",      'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/home",        "⭐ Best Sellers Home",        'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/automotive",  "⭐ Best Sellers Automotive",  'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/grocery",     "⭐ Best Sellers Grocery",     'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/fashion",     "⭐ Best Sellers Fashion",     'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/sports",      "⭐ Best Sellers Sports",      'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/toys",        "⭐ Best Sellers Toys",        'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/baby",        "⭐ Best Sellers Baby",        'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/pet",         "⭐ Best Sellers Pet",         'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/office",      "⭐ Best Sellers Office",      'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/luggage",     "⭐ Best Sellers Luggage",     'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/kitchen",     "⭐ Best Sellers Kitchen",     'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/computers",   "⭐ Best Sellers Computers",   'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/watches",     "⭐ Best Sellers Watches",     'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/shoes",       "⭐ Best Sellers Shoes",       'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/jewelry",     "⭐ Best Sellers Jewelry",     'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/health",      "⭐ Best Sellers Health",      'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/tools",       "⭐ Best Sellers Tools",       'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/garden",      "⭐ Best Sellers Garden",      'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/books",       "⭐ Best Sellers Books",       'best_sellers'),
-
-    # 📱 ELECTRONICS
-    ("https://www.amazon.sa/s?k=electronics&s=review-rank",       "📱 Electronics",      'search'),
-    ("https://www.amazon.sa/s?k=smartphones&s=review-rank",       "📱 Smartphones",      'search'),
-    ("https://www.amazon.sa/s?k=tablets&s=review-rank",           "📱 Tablets",          'search'),
-    ("https://www.amazon.sa/s?k=laptops&s=review-rank",           "💻 Laptops",          'search'),
-    ("https://www.amazon.sa/s?k=headphones&s=review-rank",        "🎧 Headphones",       'search'),
-    ("https://www.amazon.sa/s?k=smartwatch&s=review-rank",        "⌚ Smartwatch",       'search'),
-    ("https://www.amazon.sa/s?k=cameras&s=review-rank",           "📷 Cameras",          'search'),
-    ("https://www.amazon.sa/s?k=tv+television&s=review-rank",     "📺 TV",               'search'),
-    ("https://www.amazon.sa/s?k=monitor+screen&s=review-rank",    "🖥️ Monitor",          'search'),
-    ("https://www.amazon.sa/s?k=router+wifi&s=review-rank",       "📡 Router WiFi",      'search'),
-    ("https://www.amazon.sa/s?k=power+bank&s=review-rank",        "🔋 Power Bank",       'search'),
-    ("https://www.amazon.sa/s?k=fast+charger&s=review-rank",      "🔌 Fast Charger",     'search'),
-    ("https://www.amazon.sa/s?k=wireless+earbuds&s=review-rank",  "🎧 Earbuds",          'search'),
-    ("https://www.amazon.sa/s?k=gaming+keyboard&s=review-rank",   "⌨️ Keyboard",         'search'),
-    ("https://www.amazon.sa/s?k=gaming+mouse&s=review-rank",      "🖱️ Mouse",            'search'),
-    ("https://www.amazon.sa/s?k=external+ssd&s=review-rank",      "💾 SSD",              'search'),
-    ("https://www.amazon.sa/s?k=external+hard+drive&s=review-rank","💾 Hard Drive",      'search'),
-    ("https://www.amazon.sa/s?k=usb+hub&s=review-rank",           "💾 USB Hub",          'search'),
-    ("https://www.amazon.sa/s?k=home+projector&s=review-rank",    "📽️ Projector",        'search'),
-    ("https://www.amazon.sa/s?k=printer&s=review-rank",           "🖨️ Printer",          'search'),
-
-    # 🌸 PERFUMES & BEAUTY
-    ("https://www.amazon.sa/s?k=perfume+men&s=review-rank",        "🌸 Perfume Men",      'search'),
-    ("https://www.amazon.sa/s?k=perfume+women&s=review-rank",      "🌸 Perfume Women",    'search'),
-    ("https://www.amazon.sa/s?k=oud+perfume&s=review-rank",        "🌸 Oud Perfume",      'search'),
-    ("https://www.amazon.sa/s?k=arabic+perfume&s=review-rank",     "🌸 Arabic Perfume",   'search'),
-    ("https://www.amazon.sa/s?k=face+serum&s=review-rank",         "💆 Face Serum",       'search'),
-    ("https://www.amazon.sa/s?k=face+moisturizer&s=review-rank",   "💆 Moisturizer",      'search'),
-    ("https://www.amazon.sa/s?k=sunscreen+spf&s=review-rank",      "💆 Sunscreen",        'search'),
-    ("https://www.amazon.sa/s?k=face+wash+cleanser&s=review-rank", "💆 Face Wash",        'search'),
-    ("https://www.amazon.sa/s?k=foundation+makeup&s=review-rank",  "💄 Foundation",       'search'),
-    ("https://www.amazon.sa/s?k=mascara&s=review-rank",            "💄 Mascara",          'search'),
-    ("https://www.amazon.sa/s?k=lipstick&s=review-rank",           "💄 Lipstick",         'search'),
-    ("https://www.amazon.sa/s?k=hair+shampoo&s=review-rank",       "💆 Shampoo",          'search'),
-    ("https://www.amazon.sa/s?k=hair+oil&s=review-rank",           "💆 Hair Oil",         'search'),
-    ("https://www.amazon.sa/s?k=body+lotion&s=review-rank",        "🧴 Body Lotion",      'search'),
-    ("https://www.amazon.sa/s?k=body+wash&s=review-rank",          "🧴 Body Wash",        'search'),
-    ("https://www.amazon.sa/s?k=deodorant&s=review-rank",          "🧴 Deodorant",        'search'),
-    ("https://www.amazon.sa/s?k=vitamin+c+serum&s=review-rank",    "💆 Vitamin C Serum",  'search'),
-    ("https://www.amazon.sa/s?k=eye+cream&s=review-rank",          "💆 Eye Cream",        'search'),
-
-    # 🏠 HOME & KITCHEN
-    ("https://www.amazon.sa/s?k=vacuum+cleaner&s=review-rank",      "🏠 Vacuum Cleaner",   'search'),
-    ("https://www.amazon.sa/s?k=robot+vacuum&s=review-rank",        "🏠 Robot Vacuum",     'search'),
-    ("https://www.amazon.sa/s?k=air+fryer&s=review-rank",           "🍳 Air Fryer",        'search'),
-    ("https://www.amazon.sa/s?k=coffee+machine&s=review-rank",      "☕ Coffee Machine",   'search'),
-    ("https://www.amazon.sa/s?k=blender&s=review-rank",             "🍹 Blender",          'search'),
-    ("https://www.amazon.sa/s?k=stand+mixer&s=review-rank",         "🍳 Stand Mixer",      'search'),
-    ("https://www.amazon.sa/s?k=air+purifier&s=review-rank",        "🌬️ Air Purifier",     'search'),
-    ("https://www.amazon.sa/s?k=humidifier&s=review-rank",          "🌬️ Humidifier",       'search'),
-    ("https://www.amazon.sa/s?k=water+dispenser&s=review-rank",     "💧 Water Dispenser",  'search'),
-    ("https://www.amazon.sa/s?k=steam+iron&s=review-rank",          "🏠 Steam Iron",       'search'),
-    ("https://www.amazon.sa/s?k=nonstick+cookware&s=review-rank",   "🍳 Cookware Set",     'search'),
-    ("https://www.amazon.sa/s?k=kitchen+knife+set&s=review-rank",   "🍳 Knife Set",        'search'),
-    ("https://www.amazon.sa/s?k=storage+organizer&s=review-rank",   "🏠 Storage",          'search'),
-    ("https://www.amazon.sa/s?k=blackout+curtains&s=review-rank",   "🏠 Curtains",         'search'),
-    ("https://www.amazon.sa/s?k=bedding+set&s=review-rank",         "🛏️ Bedding Set",      'search'),
-    ("https://www.amazon.sa/s?k=memory+foam+pillow&s=review-rank",  "🛏️ Pillow",           'search'),
-    ("https://www.amazon.sa/s?k=mattress+topper&s=review-rank",     "🛏️ Mattress Topper",  'search'),
-    ("https://www.amazon.sa/s?k=cleaning+products&s=review-rank",   "🧹 Cleaning",         'search'),
-    ("https://www.amazon.sa/s?k=fabric+softener&s=review-rank",     "🧴 Fabric Softener",  'search'),
-    ("https://www.amazon.sa/s?k=dishwasher+detergent&s=review-rank","🧴 Dishwasher",       'search'),
-
-    # 🚗 AUTOMOTIVE
-    ("https://www.amazon.sa/s?k=car+accessories&s=review-rank",     "🚗 Car Accessories",  'search'),
-    ("https://www.amazon.sa/s?k=car+phone+holder&s=review-rank",    "🚗 Phone Holder",     'search'),
-    ("https://www.amazon.sa/s?k=car+seat+cover&s=review-rank",      "🚗 Seat Cover",       'search'),
-    ("https://www.amazon.sa/s?k=dash+cam&s=review-rank",            "🚗 Dash Cam",         'search'),
-    ("https://www.amazon.sa/s?k=car+vacuum&s=review-rank",          "🚗 Car Vacuum",       'search'),
-    ("https://www.amazon.sa/s?k=car+air+freshener&s=review-rank",   "🚗 Air Freshener",    'search'),
-    ("https://www.amazon.sa/s?k=car+charger&s=review-rank",         "🚗 Car Charger",      'search'),
-    ("https://www.amazon.sa/s?k=tire+inflator&s=review-rank",       "🚗 Tire Inflator",    'search'),
-    ("https://www.amazon.sa/s?k=engine+oil&s=review-rank",          "🚗 Engine Oil",       'search'),
-    ("https://www.amazon.sa/s?k=windshield+sun+shade&s=review-rank","🚗 Sun Shade",        'search'),
-
-    # 👶 BABY
-    ("https://www.amazon.sa/s?k=baby+diapers&s=review-rank",        "👶 Diapers",          'search'),
-    ("https://www.amazon.sa/s?k=baby+wipes&s=review-rank",          "👶 Baby Wipes",       'search'),
-    ("https://www.amazon.sa/s?k=baby+formula+milk&s=review-rank",   "👶 Baby Formula",     'search'),
-    ("https://www.amazon.sa/s?k=baby+monitor&s=review-rank",        "👶 Baby Monitor",     'search'),
-    ("https://www.amazon.sa/s?k=stroller&s=review-rank",            "👶 Stroller",         'search'),
-    ("https://www.amazon.sa/s?k=baby+carrier&s=review-rank",        "👶 Baby Carrier",     'search'),
-    ("https://www.amazon.sa/s?k=breast+pump&s=review-rank",         "👶 Breast Pump",      'search'),
-    ("https://www.amazon.sa/s?k=baby+bottle&s=review-rank",         "👶 Baby Bottle",      'search'),
-    ("https://www.amazon.sa/s?k=baby+toys&s=review-rank",           "👶 Baby Toys",        'search'),
-    ("https://www.amazon.sa/s?k=baby+crib&s=review-rank",           "👶 Baby Crib",        'search'),
-
-    # 🏋️ SPORTS
-    ("https://www.amazon.sa/s?k=fitness+equipment&s=review-rank",   "🏋️ Fitness",          'search'),
-    ("https://www.amazon.sa/s?k=yoga+mat&s=review-rank",            "🧘 Yoga Mat",         'search'),
-    ("https://www.amazon.sa/s?k=dumbbells&s=review-rank",           "🏋️ Dumbbells",        'search'),
-    ("https://www.amazon.sa/s?k=resistance+bands&s=review-rank",    "🏋️ Resistance Bands", 'search'),
-    ("https://www.amazon.sa/s?k=treadmill&s=review-rank",           "🏃 Treadmill",        'search'),
-    ("https://www.amazon.sa/s?k=protein+powder&s=review-rank",      "💪 Protein Powder",   'search'),
-    ("https://www.amazon.sa/s?k=running+shoes&s=review-rank",       "👟 Running Shoes",    'search'),
-    ("https://www.amazon.sa/s?k=gym+bag&s=review-rank",             "🎒 Gym Bag",          'search'),
-    ("https://www.amazon.sa/s?k=bicycle&s=review-rank",             "🚲 Bicycle",          'search'),
-    ("https://www.amazon.sa/s?k=massage+gun&s=review-rank",         "🏋️ Massage Gun",      'search'),
-
-    # 🍚 GROCERY
-    ("https://www.amazon.sa/s?k=mineral+water&s=review-rank",       "💧 Water",            'search'),
-    ("https://www.amazon.sa/s?k=basmati+rice&s=review-rank",        "🍚 Rice",             'search'),
-    ("https://www.amazon.sa/s?k=coffee+beans&s=review-rank",        "☕ Coffee",           'search'),
-    ("https://www.amazon.sa/s?k=saudi+dates&s=review-rank",         "🍚 Dates",            'search'),
-    ("https://www.amazon.sa/s?k=extra+virgin+olive+oil&s=review-rank","🫒 Olive Oil",       'search'),
-    ("https://www.amazon.sa/s?k=vitamins+supplements&s=review-rank","💊 Vitamins",         'search'),
-    ("https://www.amazon.sa/s?k=natural+honey&s=review-rank",       "🍯 Honey",            'search'),
-    ("https://www.amazon.sa/s?k=nuts+almonds&s=review-rank",        "🥜 Nuts",             'search'),
-    ("https://www.amazon.sa/s?k=arabic+tea&s=review-rank",          "🍵 Tea",              'search'),
-    ("https://www.amazon.sa/s?k=protein+bars&s=review-rank",        "🍫 Protein Bars",     'search'),
-
-    # 👗 FASHION
-    ("https://www.amazon.sa/s?k=saudi+thobe&s=review-rank",         "👗 Thobe",            'search'),
-    ("https://www.amazon.sa/s?k=abaya+women&s=review-rank",         "👗 Abaya",            'search'),
-    ("https://www.amazon.sa/s?k=men+sneakers&s=review-rank",        "👟 Sneakers",         'search'),
-    ("https://www.amazon.sa/s?k=women+heels&s=review-rank",         "👠 Heels",            'search'),
-    ("https://www.amazon.sa/s?k=sunglasses&s=review-rank",          "🕶️ Sunglasses",       'search'),
-    ("https://www.amazon.sa/s?k=men+leather+wallet&s=review-rank",  "👛 Wallet",           'search'),
-    ("https://www.amazon.sa/s?k=women+handbag&s=review-rank",       "👜 Handbag",          'search'),
-    ("https://www.amazon.sa/s?k=travel+suitcase&s=review-rank",     "🧳 Luggage",          'search'),
-    ("https://www.amazon.sa/s?k=men+watch&s=review-rank",           "⌚ Watch Men",        'search'),
-    ("https://www.amazon.sa/s?k=women+watch&s=review-rank",         "⌚ Watch Women",      'search'),
-    ("https://www.amazon.sa/s?k=backpack&s=review-rank",            "🎒 Backpack",         'search'),
-    ("https://www.amazon.sa/s?k=women+jewelry&s=review-rank",       "💍 Jewelry",          'search'),
-    ("https://www.amazon.sa/s?k=men+belt&s=review-rank",            "👔 Belt",             'search'),
-    ("https://www.amazon.sa/s?k=cotton+socks&s=review-rank",        "🧦 Socks",            'search'),
-
-    # 🧸 TOYS
-    ("https://www.amazon.sa/s?k=lego&s=review-rank",                "🧱 LEGO",             'search'),
-    ("https://www.amazon.sa/s?k=board+games&s=review-rank",         "🎲 Board Games",      'search'),
-    ("https://www.amazon.sa/s?k=remote+control+car&s=review-rank",  "🚗 RC Car",           'search'),
-    ("https://www.amazon.sa/s?k=girls+dolls&s=review-rank",         "🪆 Dolls",            'search'),
-    ("https://www.amazon.sa/s?k=boys+action+figures&s=review-rank", "🦸 Action Figures",   'search'),
-    ("https://www.amazon.sa/s?k=educational+toys&s=review-rank",    "📚 Educational Toys", 'search'),
-    ("https://www.amazon.sa/s?k=puzzle&s=review-rank",              "🧩 Puzzle",           'search'),
-    ("https://www.amazon.sa/s?k=outdoor+kids+toys&s=review-rank",   "⛹️ Outdoor Toys",     'search'),
-
-    # 🏠 SMART HOME
-    ("https://www.amazon.sa/s?k=smart+home&s=review-rank",          "🏠 Smart Home",       'search'),
-    ("https://www.amazon.sa/s?k=smart+led+bulb&s=review-rank",      "💡 Smart Bulb",       'search'),
-    ("https://www.amazon.sa/s?k=wifi+security+camera&s=review-rank","📷 Security Camera",  'search'),
-    ("https://www.amazon.sa/s?k=smart+doorbell&s=review-rank",      "🔔 Smart Doorbell",   'search'),
-    ("https://www.amazon.sa/s?k=smart+plug&s=review-rank",          "🔌 Smart Plug",       'search'),
-    ("https://www.amazon.sa/s?k=echo+alexa&s=review-rank",          "🔊 Echo / Alexa",     'search'),
-
-    # 🛠️ TOOLS & GARDEN
-    ("https://www.amazon.sa/s?k=power+drill+tools&s=review-rank",   "🔧 Power Tools",      'search'),
-    ("https://www.amazon.sa/s?k=garden+tools&s=review-rank",        "🌱 Garden Tools",     'search'),
-    ("https://www.amazon.sa/s?k=toolbox+set&s=review-rank",         "🔧 Toolbox",          'search'),
-    ("https://www.amazon.sa/s?k=ladder&s=review-rank",              "🔧 Ladder",           'search'),
-
-    # 💊 HEALTH
-    ("https://www.amazon.sa/s?k=blood+pressure+monitor&s=review-rank","💊 BP Monitor",     'search'),
-    ("https://www.amazon.sa/s?k=pulse+oximeter&s=review-rank",       "💊 Oximeter",        'search'),
-    ("https://www.amazon.sa/s?k=digital+thermometer&s=review-rank",  "💊 Thermometer",     'search'),
-    ("https://www.amazon.sa/s?k=smart+scale&s=review-rank",          "⚖️ Smart Scale",     'search'),
-    ("https://www.amazon.sa/s?k=first+aid+kit&s=review-rank",        "🏥 First Aid",       'search'),
-
-    # 📚 BOOKS & OFFICE
-    ("https://www.amazon.sa/s?k=kindle+ereader&s=review-rank",       "📚 Kindle",          'search'),
-    ("https://www.amazon.sa/s?k=notebook+journal&s=review-rank",     "📓 Notebook",        'search'),
-    ("https://www.amazon.sa/s?k=ergonomic+office+chair&s=review-rank","🪑 Office Chair",   'search'),
-    ("https://www.amazon.sa/s?k=desk+organizer&s=review-rank",       "🗂️ Desk Organizer",  'search'),
-    ("https://www.amazon.sa/s?k=pens+stationery&s=review-rank",      "🖊️ Pens",            'search'),
-]
-
-trending_tracker  = {}
-last_page_tracker = {cat[1]: 0 for cat in CATEGORIES_DEF}
-
-
-# ================== Health Server ==================
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(b'OK')
-    def log_message(self, fmt, *args): pass
-
-def run_health_server():
-    while True:
+# ========== نظام تدوير الصفحات ==========
+class PageRotationManager:
+    def __init__(self):
+        self.visited_pages = set()
+        self.page_queue = deque()
+        self.all_pages = []
+        self.rotation_count = 0
+        self.current_batch = []
+        
+    def load_state(self):
         try:
-            HTTPServer(('0.0.0.0', 8080), HealthHandler).serve_forever()
+            if os.path.exists('page_rotation.json'):
+                with open('page_rotation.json', 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.visited_pages = set(data.get('visited', []))
+                    self.rotation_count = data.get('rotation_count', 0)
+                    logger.info(f"🔄 Loaded rotation state: {len(self.visited_pages)} visited, {self.rotation_count} rotations")
         except Exception as e:
-            logger.error(f"Health: {e}")
-            time.sleep(3)
+            logger.error(f"Error loading rotation state: {e}")
+    
+    def save_state(self):
+        try:
+            with open('page_rotation.json', 'w', encoding='utf-8') as f:
+                json.dump({
+                    'visited': list(self.visited_pages),
+                    'rotation_count': self.rotation_count,
+                    'last_update': datetime.now().isoformat()
+                }, f)
+        except Exception as e:
+            logger.error(f"Error saving rotation state: {e}")
+    
+    def generate_all_pages(self, categories):
+        self.all_pages = []
+        
+        for base_url, cat_name, cat_type in categories:
+            max_pages = PAGES_CONFIG.get(cat_type, 1)
+            
+            for page_num in range(1, max_pages + 1):
+                page_url = self._build_page_url(base_url, page_num)
+                page_id = f"{cat_name}_page{page_num}"
+                
+                self.all_pages.append({
+                    'id': page_id,
+                    'url': page_url,
+                    'category': cat_name,
+                    'type': cat_type,
+                    'page_num': page_num,
+                    'base_url': base_url
+                })
+        
+        logger.info(f"📋 Generated {len(self.all_pages)} total pages")
+        return self.all_pages
+    
+    def _build_page_url(self, base_url, page_num):
+        if page_num == 1:
+            return base_url
+            
+        if 'gp/bestsellers' in base_url or 'gp/goldbox' in base_url:
+            separator = '&' if '?' in base_url else '?'
+            return f"{base_url}{separator}pg={page_num}"
+        elif '/s?' in base_url or 'keywords=' in base_url:
+            separator = '&' if '?' in base_url else '?'
+            return f"{base_url}{separator}page={page_num}"
+        else:
+            separator = '&' if '?' in base_url else '?'
+            return f"{base_url}{separator}page={page_num}"
+    
+    def get_next_batch(self, batch_size=50):
+        if not self.page_queue:
+            self._refill_queue()
+        
+        batch = []
+        available_pages = [p for p in self.page_queue if p['id'] not in self.visited_pages]
+        
+        if len(self.visited_pages) >= len(self.all_pages) * 0.9:
+            logger.info("🔄 All pages visited, resetting rotation...")
+            self.visited_pages.clear()
+            self.rotation_count += 1
+            self._refill_queue()
+            available_pages = list(self.page_queue)
+        
+        random.shuffle(available_pages)
+        batch = available_pages[:batch_size]
+        
+        for page in batch:
+            if page in self.page_queue:
+                self.page_queue.remove(page)
+            self.visited_pages.add(page['id'])
+        
+        self.current_batch = batch
+        self.save_state()
+        
+        logger.info(f"🎯 Selected batch: {len(batch)} pages (Total visited: {len(self.visited_pages)})")
+        return batch
+    
+    def _refill_queue(self):
+        unvisited = [p for p in self.all_pages if p['id'] not in self.visited_pages]
+        
+        if not unvisited:
+            unvisited = self.all_pages.copy()
+            self.visited_pages.clear()
+            self.rotation_count += 1
+        
+        random.shuffle(unvisited)
+        self.page_queue = deque(unvisited)
+        logger.info(f"🔄 Refilled queue with {len(unvisited)} pages")
+    
+    def get_stats(self):
+        return {
+            'total_pages': len(self.all_pages),
+            'visited_pages': len(self.visited_pages),
+            'remaining_pages': len(self.all_pages) - len(self.visited_pages),
+            'rotation_count': self.rotation_count,
+            'progress_percent': (len(self.visited_pages) / len(self.all_pages) * 100) if self.all_pages else 0
+        }
 
+page_rotator = PageRotationManager()
 
-# ================== Database ==================
 def load_database():
-    global sent_products, sent_hashes, last_page_tracker
+    global sent_products, sent_hashes
     try:
         if os.path.exists('bot_database.json'):
-            with open('bot_database.json') as f:
+            with open('bot_database.json', 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            sent_products = set(data.get('ids', []))
-            sent_hashes   = set(data.get('hashes', []))
-            for cat in CATEGORIES_DEF:
-                if cat[1] in data.get('last_pages', {}):
-                    last_page_tracker[cat[1]] = data['last_pages'][cat[1]]
-            logger.info(f"📦 Loaded {len(sent_products)} products")
+                sent_products = set(data.get('ids', []))
+                sent_hashes = set(data.get('hashes', []))
+                logger.info(f"📦 Loaded: {len(sent_products)}")
     except Exception as e:
-        logger.error(f"DB Load: {e}")
+        logger.error(f"Error loading DB: {e}")
 
 def save_database():
     try:
-        with open('bot_database.json', 'w') as f:
+        with open('bot_database.json', 'w', encoding='utf-8') as f:
             json.dump({
-                'ids':        list(sent_products)[-5000:],
-                'hashes':     list(sent_hashes)[-5000:],
-                'last_pages': last_page_tracker
+                'ids': list(sent_products),
+                'hashes': list(sent_hashes)
             }, f)
     except Exception as e:
-        logger.error(f"DB Save: {e}")
+        logger.error(f"Error saving DB: {e}")
 
-
-# ================== Helpers ==================
 def extract_asin(link):
-    if not link: return None
-    for p in [r'/dp/([A-Z0-9]{10})', r'/gp/product/([A-Z0-9]{10})']:
-        m = re.search(p, link, re.I)
-        if m: return m.group(1).upper()
-    return None
-
-def title_hash(title):
-    c = re.sub(r'[^\w\s]','', title.lower())
-    c = re.sub(r'\s+',' ', c).strip()
-    return hashlib.md5(c[:30].encode()).hexdigest()[:16]
-
-def is_duplicate(title):
-    return title_hash(title) in sent_hashes
-
-def product_id(title, link, price):
-    asin = extract_asin(link)
-    return f"ASIN_{asin}" if asin else f"HASH_{hashlib.md5(f'{title}_{price}'.encode()).hexdigest()[:12]}"
-
-def page_url(base, n):
-    if n <= 1: return base
-    if 'page=' in base: return re.sub(r'page=\d+', f'page={n}', base)
-    sep = '&' if '?' in base else '?'
-    return f"{base}{sep}page={n}"
-
-def trending_score(reviews, rating, discount):
-    return reviews * rating * (1 + discount / 100)
-
-
-# ================== Scraper ==================
-def make_session():
-    s = cloudscraper.create_scraper(
-        browser={'browser':'chrome','platform':'windows','desktop':True}, delay=10)
-    s.headers.update({'User-Agent': ua.random,
-                      'Accept-Language': 'ar-SA,ar;q=0.9',
-                      'Referer': 'https://www.amazon.sa/'})
-    return s
-
-def fetch(session, url, retries=2):
-    for _ in range(retries):
-        try:
-            time.sleep(random.uniform(1, 3))
-            r = session.get(url, timeout=30)
-            if r.status_code == 200 and len(r.text) > 5000:
-                return r.text
-            time.sleep(3)
-        except Exception as e:
-            logger.error(f"Fetch: {e}")
-            time.sleep(3)
-    return None
-
-def parse_num(text):
-    m = re.search(r'(\d+\.?\d*)', str(text))
-    return float(m.group(1)) if m else 0
-
-def parse_item(item, category, is_bs=False):
-    try:
-        price = None
-        for sel in ['.a-price-whole','.a-price .a-offscreen','.a-price']:
-            el = item.select_one(sel)
-            if el:
-                m = re.search(r'[\d]+\.?\d*',
-                    el.text.replace(',','').replace('ريال','').replace('٬',''))
-                if m:
-                    price = float(m.group()); break
-        if not price or price <= 0: return None
-
-        old_price = 0; discount = 0
-        old_el = item.find('span', class_='a-text-price')
-        if old_el:
-            m = re.search(r'[\d,]+\.?\d*',
-                old_el.get_text().replace(',','').replace('٬',''))
-            if m:
-                try:
-                    old_price = float(m.group())
-                    if old_price > price:
-                        discount = int(((old_price - price) / old_price) * 100)
-                except: pass
-
-        if discount == 0:
-            badge = item.find(string=re.compile(r'\d+%'))
-            if badge:
-                m = re.search(r'(\d+)', str(badge))
-                if m:
-                    discount = int(m.group())
-                    old_price = price / (1 - discount/100) if discount < 100 else price
-
-        title = "Unknown"
-        for sel in ['h2 a span','h2 span','.a-size-mini span',
-                    '.a-size-base-plus','.a-size-medium']:
-            el = item.select_one(sel)
-            if el and len(el.text.strip()) > 5:
-                title = el.text.strip(); break
-
-        link = ""
-        a = item.find('a', href=True)
-        if a:
-            h = a['href']
-            if h.startswith('/'): link = f"https://www.amazon.sa{h}"
-            elif 'amazon.sa' in h: link = h
-            else:
-                asin = extract_asin(h)
-                if asin: link = f"https://www.amazon.sa/dp/{asin}"
-
-        rating = 0
-        re_el = item.find('span', class_='a-icon-alt')
-        if re_el: rating = parse_num(re_el.text)
-
-        reviews = 0
-        rv_el = item.find('span', class_='a-size-base')
-        if rv_el:
-            m = re.search(r'[\d,]+', rv_el.text)
-            if m:
-                try: reviews = int(m.group().replace(',',''))
-                except: pass
-
-        return {
-            'title':    title[:120],
-            'price':    price,
-            'old_price':round(old_price,2) if old_price > price else (round(price*100/(100-discount),2) if discount>0 else price),
-            'discount': discount,
-            'rating':   rating,
-            'reviews':  reviews,
-            'link':     link,
-            'category': category,
-            'score':    trending_score(reviews, rating, discount),
-            'id':       product_id(title, link, price)
-        }
-    except:
+    if not link:
         return None
+    patterns = [r'/dp/([A-Z0-9]{10})', r'/gp/product/([A-Z0-9]{10})', r'product/([A-Z0-9]{10})']
+    for p in patterns:
+        match = re.search(p, link, re.I)
+        if match:
+            asin = match.group(1).upper()
+            if len(asin) == 10:
+                return asin
+    return None
 
+def create_title_hash(title):
+    clean = re.sub(r'[^\w\s]', '', title.lower())
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    clean = re.sub(r'\d+', '', clean)
+    for word in ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'shipped', 'شحن']:
+        clean = clean.replace(word, '')
+    return hashlib.md5(clean[:30].strip().encode()).hexdigest()[:16]
 
-# ================== Main Search ==================
-def search_all_deals(chat_id=None, status_id=None):
-    global last_page_tracker, trending_tracker
-    trending_tracker = {}
+def is_similar_product(title):
+    new_hash = create_title_hash(title)
+    if new_hash in sent_hashes:
+        return True
+    for existing_hash in list(sent_hashes)[-200:]:
+        if new_hash[:10] == existing_hash[:10]:
+            return True
+    return False
 
-    deals   = []
-    session = make_session()
-    cats    = list(CATEGORIES_DEF)
-    random.shuffle(cats)
-    page_n  = 0
+def get_product_id(deal):
+    asin = extract_asin(deal.get('link', ''))
+    if asin:
+        return f"ASIN_{asin}"
+    key = f"{deal.get('title', '')}_{deal.get('price', 0)}"
+    return f"HASH_{hashlib.md5(key.encode()).hexdigest()[:12]}"
 
-    for base_url, cat_name, cat_type in cats:
-        start = last_page_tracker.get(cat_name, 0) + 1
+def parse_rating(text):
+    if not text:
+        return 0
+    match = re.search(r'(\d+\.?\d*)', str(text))
+    return float(match.group(1)) if match else 0
 
-        for pg in range(start, start + 20):
-            page_n += 1
-            url = page_url(base_url, pg)
-
-            if chat_id and status_id and page_n % 10 == 0:
-                try:
-                    updater.bot.edit_message_text(
-                        chat_id=chat_id, message_id=status_id,
-                        text=f"🔍 *جاري البحث...*\n\n📄 صفحات: {page_n}\n✅ عروض: {len(deals)}\n⏳ قسم: {cat_name}",
-                        parse_mode='Markdown')
-                except: pass
-
-            html = fetch(session, url)
-            if not html: continue
-
-            soup  = BeautifulSoup(html, 'html.parser')
-            items = []
-            if cat_type == 'best_sellers':
-                items += soup.find_all('li',  class_='zg-item-immersion')
-                items += soup.find_all('div', class_='p13n-sc-uncoverable-faceout')
-            items += soup.find_all('div', {'data-component-type':'s-search-result'})
-            items += soup.find_all('div', {'data-testid':'deal-card'})
-            items += soup.find_all('div', class_='s-result-item')
-
-            if not items:
-                logger.info(f"⛔ Empty [{cat_name}] p{pg}")
-                break
-
-            logger.info(f"🔍 [{cat_name}] p{pg} → {len(items)} items | deals so far: {len(deals)}")
-
-            for item in items:
-                try:
-                    d = parse_item(item, cat_name, cat_type=='best_sellers')
-                    if not d: continue
-
-                    # ترندينج
-                    if d['reviews'] >= TRENDING_MIN_REVIEWS and d['rating'] >= TRENDING_MIN_RATING:
-                        pid = d['id']
-                        if pid not in trending_tracker or d['score'] > trending_tracker[pid]['score']:
-                            trending_tracker[pid] = d.copy()
-
-                    # عروض 40%+
-                    if d['discount'] >= MIN_DISCOUNT and d['rating'] >= MIN_RATING:
-                        if d['id'] not in sent_products and not is_duplicate(d['title']):
-                            deals.append(d)
-                            logger.info(f"✅ {d['title'][:35]} | -{d['discount']}% | ⭐{d['rating']}")
-                except: continue
-
-            last_page_tracker[cat_name] = pg
-            time.sleep(random.uniform(1, 2))
-
-        if deals:
-            send_deals(deals, chat_id)
-            deals = []
-
-    send_trending(chat_id)
-    save_database()
-    logger.info("🎯 Done!")
-
-
-# ================== Send Deals ==================
-def send_deals(deals, chat_id):
-    if not deals: return
-    super_d  = [d for d in deals if d['discount'] >= 90]
-    normal_d = [d for d in deals if d['discount'] <  90]
-
-    if super_d:
-        msg = "🚨🚨🚨 *عروض خرافية 90%+* 🚨🚨🚨\n\n"
-        for i, d in enumerate(super_d, 1):
-            sv = d['old_price'] - d['price'] if d['old_price'] > d['price'] else 0
-            msg += f"*{i}. {d['title'][:50]}*\n"
-            msg += f"💰 {d['price']:.0f} ر.س ~~{d['old_price']:.0f}~~ | 🔥 -{d['discount']}% (وفّر {sv:.0f})\n"
-            msg += f"⭐ {d['rating']}/5 | 💬 {d['reviews']:,}\n"
-            msg += f"🔗 [اشتري]({d['link']})\n\n"
-        try: updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
-        except Exception as e: logger.error(f"Super send: {e}")
-        time.sleep(1)
-
-    if normal_d:
-        msg = f"🔥 *عروض 40%+* ({len(normal_d)} منتج)\n\n"
-        cnt = 0
-        for i, d in enumerate(normal_d, 1):
-            if d['id'] in sent_products: continue
-            sv = d['old_price'] - d['price'] if d['old_price'] > d['price'] else 0
-            msg += f"*{d['title'][:50]}*\n"
-            msg += f"💰 {d['price']:.0f} ر.س ~~{d['old_price']:.0f}~~ | 📉 *-{d['discount']}%*"
-            if sv > 0: msg += f" (وفّر {sv:.0f})"
-            msg += f"\n⭐ {d['rating']}/5"
-            if d['reviews'] > 0: msg += f" | 💬 {d['reviews']:,}"
-            msg += f"\n🏷️ {d['category']}\n🔗 [اشتري]({d['link']})\n\n"
-            cnt += 1
-
-            if cnt % 5 == 0 or i == len(normal_d):
-                try:
-                    updater.bot.send_message(chat_id=chat_id, text=msg,
-                        parse_mode='Markdown', disable_web_page_preview=True)
-                    msg = ""
-                except Exception as e: logger.error(f"Send: {e}")
-                time.sleep(0.5)
-
-            sent_products.add(d['id'])
-            sent_hashes.add(title_hash(d['title']))
-
-    for d in super_d:
-        sent_products.add(d['id'])
-        sent_hashes.add(title_hash(d['title']))
-    save_database()
-
-
-# ================== Trending Report ==================
-def send_trending(chat_id):
-    if not trending_tracker: return
-    items = sorted(
-        [v for v in trending_tracker.values() if v.get('title') and v.get('link')],
-        key=lambda x: x['score'], reverse=True
-    )[:25]
-    if not items: return
-
-    logger.info(f"📊 Trending report: {len(items)} products")
-    msg = (
-        "📊🔥 *الأكثر شراءً في السعودية الآن* 🇸🇦\n"
-        "━━━━━━━━━━━━━━━━━━\n"
-        "_مرتبة: مراجعات × تقييم × خصم_\n\n"
+def create_session():
+    session = cloudscraper.create_scraper(
+        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True},
+        delay=10
     )
+    session.headers.update({
+        'User-Agent': ua.random,
+        'Accept-Language': 'ar-SA,ar;q=0.9',
+        'Referer': 'https://www.amazon.sa/',
+    })
+    return session
 
-    for i, d in enumerate(items, 1):
-        sv = d['old_price'] - d['price'] if d['old_price'] > d['price'] else 0
-        msg += f"*{i}. {d['title'][:55]}*\n"
-        msg += f"   💰 {d['price']:.0f} ر.س"
-        if d['discount'] > 0: msg += f" | 📉 -{d['discount']}%"
-        if sv > 0: msg += f" (وفّر {sv:.0f})"
-        msg += f"\n   ⭐ {d['rating']}/5 | 💬 {d['reviews']:,} مراجعة"
-        msg += f"\n   🏷️ {d['category']}\n   🔗 [تسوق]({d['link']})\n\n"
-
-    msg += f"━━━━━━━━━━━━━━━━━━\n📈 رُصد {len(trending_tracker):,} منتج شعبي"
-
-    def _send(text):
+def fetch_page(session, url):
+    for i in range(3):
         try:
-            updater.bot.send_message(chat_id=chat_id, text=text,
-                parse_mode='Markdown', disable_web_page_preview=True)
-        except Exception as e: logger.error(f"Trending: {e}")
+            time.sleep(random.uniform(1, 2))
+            r = session.get(url, timeout=25)
+            if r.status_code == 200:
+                return r.text
+            time.sleep(2)
+        except Exception as e:
+            logger.warning(f"Attempt {i+1} failed: {e}")
+    return None
 
-    if len(msg) <= 4000:
-        _send(msg)
-    else:
-        parts = msg.split('\n\n')
-        chunk = ""
-        for p in parts:
-            if len(chunk) + len(p) + 2 < 4000: chunk += p + "\n\n"
-            else:
-                _send(chunk); chunk = p + "\n\n"; time.sleep(0.5)
-        if chunk: _send(chunk)
+PAGES_CONFIG = {
+    'best_sellers': 3,
+    'deals': 2,
+    'warehouse': 2,
+    'coupons': 2,
+    'search': 2,
+    'outlet': 2,
+    'prime': 2,
+    'lightning': 1,
+    'today': 2,
+    'clearance': 3,
+}
 
-    logger.info("✅ Trending sent!")
+CATEGORIES_DEF = [
+    ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/watches", "⌚ Watches Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/shoes", "👟 Shoes Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/kitchen", "🍳 Kitchen Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/home", "🏠 Home Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/computers", "💻 Computers Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/mobile", "📱 Mobile Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/perfumes", "🌸 Perfumes Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/toys", "🎮 Toys Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/sports", "⚽ Sports Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/baby", "👶 Baby Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/grocery", "🛒 Grocery Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/automotive", "🚗 Automotive Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/tools", "🔧 Tools Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/books", "📚 Books Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/jewelry", "💎 Jewelry Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/luggage", "🧳 Luggage Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/pet", "🐾 Pet Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/office", "📎 Office Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/personal-care", "🧴 Personal Care Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/health", "💊 Health Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/video-games", "🎮 Games Best Seller", 'best_sellers'),
+    ("https://www.amazon.sa/gp/bestsellers/camera", "📷 Camera Best Seller", 'best_sellers'),
+    
+    ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox", 'deals'),
+    ("https://www.amazon.sa/deals/electronics", "📱 Electronics Deals", 'deals'),
+    ("https://www.amazon.sa/deals/fashion", "👕 Fashion Deals", 'deals'),
+    ("https://www.amazon.sa/deals/beauty", "💄 Beauty Deals", 'deals'),
+    ("https://www.amazon.sa/deals/home", "🏠 Home Deals", 'deals'),
+    ("https://www.amazon.sa/deals/kitchen", "🍳 Kitchen Deals", 'deals'),
+    ("https://www.amazon.sa/deals/watches", "⌚ Watches Deals", 'deals'),
+    ("https://www.amazon.sa/deals/perfumes", "🌸 Perfumes Deals", 'deals'),
+    ("https://www.amazon.sa/deals/toys", "🎮 Toys Deals", 'deals'),
+    ("https://www.amazon.sa/deals/sports", "⚽ Sports Deals", 'deals'),
+    ("https://www.amazon.sa/deals/baby", "👶 Baby Deals", 'deals'),
+    ("https://www.amazon.sa/deals/grocery", "🛒 Grocery Deals", 'deals'),
+    ("https://www.amazon.sa/deals/automotive", "🚗 Automotive Deals", 'deals'),
+    ("https://www.amazon.sa/deals/tools", "🔧 Tools Deals", 'deals'),
+    ("https://www.amazon.sa/deals/office", "📎 Office Deals", 'deals'),
+    ("https://www.amazon.sa/deals/books", "📚 Books Deals", 'deals'),
+    
+    ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse Deals", 'warehouse'),
+    ("https://www.amazon.sa/gp/warehouse-deals/electronics", "🏭 Warehouse Electronics", 'warehouse'),
+    ("https://www.amazon.sa/gp/warehouse-deals/fashion", "🏭 Warehouse Fashion", 'warehouse'),
+    ("https://www.amazon.sa/gp/warehouse-deals/home", "🏭 Warehouse Home", 'warehouse'),
+    ("https://www.amazon.sa/gp/warehouse-deals/kitchen", "🏭 Warehouse Kitchen", 'warehouse'),
+    ("https://www.amazon.sa/gp/warehouse-deals/beauty", "🏭 Warehouse Beauty", 'warehouse'),
+    ("https://www.amazon.sa/gp/warehouse-deals/sports", "🏭 Warehouse Sports", 'warehouse'),
+    ("https://www.amazon.sa/gp/warehouse-deals/tools", "🏭 Warehouse Tools", 'warehouse'),
+    
+    ("https://www.amazon.sa/gp/coupons", "🎟️ Coupons", 'coupons'),
+    ("https://www.amazon.sa/gp/coupons/electronics", "🎟️ Electronics Coupons", 'coupons'),
+    ("https://www.amazon.sa/gp/coupons/fashion", "🎟️ Fashion Coupons", 'coupons'),
+    ("https://www.amazon.sa/gp/coupons/home", "🎟️ Home Coupons", 'coupons'),
+    ("https://www.amazon.sa/gp/coupons/beauty", "🎟️ Beauty Coupons", 'coupons'),
+    ("https://www.amazon.sa/gp/coupons/grocery", "🎟️ Grocery Coupons", 'coupons'),
+    ("https://www.amazon.sa/gp/coupons/baby", "🎟️ Baby Coupons", 'coupons'),
+    
+    ("https://www.amazon.sa/gp/prime/pipeline/prime_exclusives", "👑 Prime Exclusives", 'prime'),
+    ("https://www.amazon.sa/gp/prime/pipeline/lightning_deals", "⚡ Lightning Deals", 'lightning'),
+    
+    ("https://www.amazon.sa/gp/todays-deals", "📅 Today Deals", 'today'),
+    ("https://www.amazon.sa/gp/todays-deals/electronics", "📅 Today Electronics", 'today'),
+    ("https://www.amazon.sa/gp/todays-deals/fashion", "📅 Today Fashion", 'today'),
+    ("https://www.amazon.sa/gp/todays-deals/home", "📅 Today Home", 'today'),
+    ("https://www.amazon.sa/gp/todays-deals/beauty", "📅 Today Beauty", 'today'),
+    
+    ("https://www.amazon.sa/outlet", "🎁 Outlet", 'outlet'),
+    ("https://www.amazon.sa/outlet/electronics", "🎁 Outlet Electronics", 'outlet'),
+    ("https://www.amazon.sa/outlet/home", "🎁 Outlet Home", 'outlet'),
+    ("https://www.amazon.sa/outlet/fashion", "🎁 Outlet Fashion", 'outlet'),
+    ("https://www.amazon.sa/outlet/beauty", "🎁 Outlet Beauty", 'outlet'),
+    
+    ("https://www.amazon.sa/s?k=clearance&rh=p_8%3A50-99", "🔥 Clearance", 'clearance'),
+    ("https://www.amazon.sa/s?k=last+chance&rh=p_8%3A50-99", "🔥 Last Chance", 'clearance'),
+    ("https://www.amazon.sa/s?k=final+sale&rh=p_8%3A50-99", "🔥 Final Sale", 'clearance'),
+    ("https://www.amazon.sa/s?k=limited+time&rh=p_8%3A50-99", "⏰ Limited Time", 'clearance'),
+    ("https://www.amazon.sa/s?k=flash+sale&rh=p_8%3A50-99", "⚡ Flash Sale", 'clearance'),
+    ("https://www.amazon.sa/s?k=super+sale&rh=p_8%3A50-99", "💥 Super Sale", 'clearance'),
+    ("https://www.amazon.sa/s?k=mega+deal&rh=p_8%3A50-99", "🎯 Mega Deal", 'clearance'),
+    ("https://www.amazon.sa/s?k=big+sale&rh=p_8%3A50-99", "🎪 Big Sale", 'clearance'),
+    
+    ("https://www.amazon.sa/s?k=iphone&rh=p_8%3A30-99", "🍎 iPhone", 'search'),
+    ("https://www.amazon.sa/s?k=ipad&rh=p_8%3A30-99", "🍎 iPad", 'search'),
+    ("https://www.amazon.sa/s?k=macbook&rh=p_8%3A30-99", "🍎 MacBook", 'search'),
+    ("https://www.amazon.sa/s?k=airpods&rh=p_8%3A30-99", "🍎 AirPods", 'search'),
+    ("https://www.amazon.sa/s?k=apple+watch&rh=p_8%3A30-99", "🍎 Apple Watch", 'search'),
+    ("https://www.amazon.sa/s?k=apple+tv&rh=p_8%3A30-99", "🍎 Apple TV", 'search'),
+    ("https://www.amazon.sa/s?k=airtag&rh=p_8%3A30-99", "🍎 AirTag", 'search'),
+    ("https://www.amazon.sa/s?k=homepod&rh=p_8%3A30-99", "🍎 HomePod", 'search'),
+    
+    ("https://www.amazon.sa/s?k=samsung+galaxy&rh=p_8%3A30-99", "📱 Galaxy Phone", 'search'),
+    ("https://www.amazon.sa/s?k=samsung+tablet&rh=p_8%3A30-99", "📱 Galaxy Tab", 'search'),
+    ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "📱 Galaxy Watch", 'search'),
+    ("https://www.amazon.sa/s?k=samsung+buds&rh=p_8%3A30-99", "📱 Galaxy Buds", 'search'),
+    ("https://www.amazon.sa/s?k=samsung+tv&rh=p_8%3A30-99", "📱 Samsung TV", 'search'),
+    ("https://www.amazon.sa/s?k=samsung+monitor&rh=p_8%3A30-99", "📱 Samsung Monitor", 'search'),
+    
+    ("https://www.amazon.sa/s?k=sony+headphones&rh=p_8%3A30-99", "🎧 Sony Headphones", 'search'),
+    ("https://www.amazon.sa/s?k=bose+headphones&rh=p_8%3A30-99", "🎧 Bose Headphones", 'search'),
+    ("https://www.amazon.sa/s?k=beats+headphones&rh=p_8%3A30-99", "🎧 Beats Headphones", 'search'),
+    ("https://www.amazon.sa/s?k=jbl+speaker&rh=p_8%3A30-99", "🎧 JBL Speaker", 'search'),
+    ("https://www.amazon.sa/s?k=harman+kardon&rh=p_8%3A30-99", "🎧 Harman Kardon", 'search'),
+    ("https://www.amazon.sa/s?k=marshall&rh=p_8%3A30-99", "🎧 Marshall", 'search'),
+    ("https://www.amazon.sa/s?k=skullcandy&rh=p_8%3A30-99", "🎧 Skullcandy", 'search'),
+    ("https://www.amazon.sa/s?k=sennheiser&rh=p_8%3A30-99", "🎧 Sennheiser", 'search'),
+    
+    ("https://www.amazon.sa/s?k=lenovo+laptop&rh=p_8%3A30-99", "💻 Lenovo Laptop", 'search'),
+    ("https://www.amazon.sa/s?k=hp+laptop&rh=p_8%3A30-99", "💻 HP Laptop", 'search'),
+    ("https://www.amazon.sa/s?k=dell+laptop&rh=p_8%3A30-99", "💻 Dell Laptop", 'search'),
+    ("https://www.amazon.sa/s?k=asus+laptop&rh=p_8%3A30-99", "💻 Asus Laptop", 'search'),
+    ("https://www.amazon.sa/s?k=acer+laptop&rh=p_8%3A30-99", "💻 Acer Laptop", 'search'),
+    ("https://www.amazon.sa/s?k=msi+laptop&rh=p_8%3A30-99", "💻 MSI Laptop", 'search'),
+    ("https://www.amazon.sa/s?k=razer+laptop&rh=p_8%3A30-99", "💻 Razer Laptop", 'search'),
+    ("https://www.amazon.sa/s?k=alienware&rh=p_8%3A30-99", "💻 Alienware", 'search'),
+    
+    ("https://www.amazon.sa/s?k=playstation+5&rh=p_8%3A30-99", "🎮 PS5", 'search'),
+    ("https://www.amazon.sa/s?k=playstation+4&rh=p_8%3A30-99", "🎮 PS4", 'search'),
+    ("https://www.amazon.sa/s?k=xbox+series&rh=p_8%3A30-99", "🎮 Xbox Series", 'search'),
+    ("https://www.amazon.sa/s?k=nintendo+switch&rh=p_8%3A30-99", "🎮 Nintendo Switch", 'search'),
+    ("https://www.amazon.sa/s?k=gaming+mouse&rh=p_8%3A30-99", "🎮 Gaming Mouse", 'search'),
+    ("https://www.amazon.sa/s?k=gaming+keyboard&rh=p_8%3A30-99", "🎮 Gaming Keyboard", 'search'),
+    ("https://www.amazon.sa/s?k=gaming+headset&rh=p_8%3A30-99", "🎮 Gaming Headset", 'search'),
+    ("https://www.amazon.sa/s?k=gaming+chair&rh=p_8%3A30-99", "🎮 Gaming Chair", 'search'),
+    ("https://www.amazon.sa/s?k=rtx+graphics&rh=p_8%3A30-99", "🎮 RTX Graphics", 'search'),
+    
+    ("https://www.amazon.sa/s?k=canon+camera&rh=p_8%3A30-99", "📷 Canon Camera", 'search'),
+    ("https://www.amazon.sa/s?k=nikon+camera&rh=p_8%3A30-99", "📷 Nikon Camera", 'search'),
+    ("https://www.amazon.sa/s?k=sony+camera&rh=p_8%3A30-99", "📷 Sony Camera", 'search'),
+    ("https://www.amazon.sa/s?k=fujifilm&rh=p_8%3A30-99", "📷 Fujifilm", 'search'),
+    ("https://www.amazon.sa/s?k=gopro&rh=p_8%3A30-99", "📷 GoPro", 'search'),
+    ("https://www.amazon.sa/s?k=dji&rh=p_8%3A30-99", "📷 DJI Drone", 'search'),
+    
+    ("https://www.amazon.sa/s?k=apple+watch&rh=p_8%3A30-99", "⌚ Apple Watch", 'search'),
+    ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "⌚ Galaxy Watch", 'search'),
+    ("https://www.amazon.sa/s?k=garmin&rh=p_8%3A30-99", "⌚ Garmin", 'search'),
+    ("https://www.amazon.sa/s?k=fitbit&rh=p_8%3A30-99", "⌚ Fitbit", 'search'),
+    ("https://www.amazon.sa/s?k=huawei+watch&rh=p_8%3A30-99", "⌚ Huawei Watch", 'search'),
+    ("https://www.amazon.sa/s?k=amazfit&rh=p_8%3A30-99", "⌚ Amazfit", 'search'),
+    ("https://www.amazon.sa/s?k=casio+g+shock&rh=p_8%3A30-99", "⌚ G-Shock", 'search'),
+    ("https://www.amazon.sa/s?k=casio+edifice&rh=p_8%3A30-99", "⌚ Edifice", 'search'),
+    ("https://www.amazon.sa/s?k=seiko&rh=p_8%3A30-99", "⌚ Seiko", 'search'),
+    ("https://www.amazon.sa/s?k=citizen&rh=p_8%3A30-99", "⌚ Citizen", 'search'),
+    
+    ("https://www.amazon.sa/s?k=chanel+perfume&rh=p_8%3A30-99", "🌸 Chanel", 'search'),
+    ("https://www.amazon.sa/s?k=dior+perfume&rh=p_8%3A30-99", "🌸 Dior", 'search'),
+    ("https://www.amazon.sa/s?k=gucci+perfume&rh=p_8%3A30-99", "🌸 Gucci", 'search'),
+    ("https://www.amazon.sa/s?k=versace+perfume&rh=p_8%3A30-99", "🌸 Versace", 'search'),
+    ("https://www.amazon.sa/s?k=armani+perfume&rh=p_8%3A30-99", "🌸 Armani", 'search'),
+    ("https://www.amazon.sa/s?k=prada+perfume&rh=p_8%3A30-99", "🌸 Prada", 'search'),
+    ("https://www.amazon.sa/s?k=burberry+perfume&rh=p_8%3A30-99", "🌸 Burberry", 'search'),
+    ("https://www.amazon.sa/s?k=calvin+klein+perfume&rh=p_8%3A30-99", "🌸 CK Perfume", 'search'),
+    ("https://www.amazon.sa/s?k=tom+ford+perfume&rh=p_8%3A30-99", "🌸 Tom Ford", 'search'),
+    ("https://www.amazon.sa/s?k=yves+saint+laurent+perfume&rh=p_8%3A30-99", "🌸 YSL", 'search'),
+    ("https://www.amazon.sa/s?k=creed+perfume&rh=p_8%3A30-99", "🌸 Creed", 'search'),
+    ("https://www.amazon.sa/s?k=jo+malone&rh=p_8%3A30-99", "🌸 Jo Malone", 'search'),
+    
+    ("https://www.amazon.sa/s?k=nike+shoes&rh=p_8%3A30-99", "👟 Nike Shoes", 'search'),
+    ("https://www.amazon.sa/s?k=adidas+shoes&rh=p_8%3A30-99", "👟 Adidas Shoes", 'search'),
+    ("https://www.amazon.sa/s?k=jordan&rh=p_8%3A30-99", "👟 Jordan", 'search'),
+    ("https://www.amazon.sa/s?k=yeezy&rh=p_8%3A30-99", "👟 Yeezy", 'search'),
+    ("https://www.amazon.sa/s?k=new+balance+shoes&rh=p_8%3A30-99", "👟 New Balance", 'search'),
+    ("https://www.amazon.sa/s?k=puma+shoes&rh=p_8%3A30-99", "👟 Puma Shoes", 'search'),
+    ("https://www.amazon.sa/s?k=reebok+shoes&rh=p_8%3A30-99", "👟 Reebok Shoes", 'search'),
+    ("https://www.amazon.sa/s?k=under+armour+shoes&rh=p_8%3A30-99", "👟 UA Shoes", 'search'),
+    ("https://www.amazon.sa/s?k=asics&rh=p_8%3A30-99", "👟 Asics", 'search'),
+    ("https://www.amazon.sa/s?k=vans&rh=p_8%3A30-99", "👟 Vans", 'search'),
+    ("https://www.amazon.sa/s?k=converse&rh=p_8%3A30-99", "👟 Converse", 'search'),
+    ("https://www.amazon.sa/s?k=crocs&rh=p_8%3A30-99", "👟 Crocs", 'search'),
+    
+    ("https://www.amazon.sa/s?k=calvin+klein+men&rh=p_8%3A30-99", "👔 CK Men", 'search'),
+    ("https://www.amazon.sa/s?k=tommy+hilfiger+men&rh=p_8%3A30-99", "👔 Tommy Men", 'search'),
+    ("https://www.amazon.sa/s?k=ralph+lauren+men&rh=p_8%3A30-99", "👔 RL Men", 'search'),
+    ("https://www.amazon.sa/s?k=lacoste+men&rh=p_8%3A30-99", "👔 Lacoste Men", 'search'),
+    ("https://www.amazon.sa/s?k=hugo+boss&rh=p_8%3A30-99", "👔 Hugo Boss", 'search'),
+    ("https://www.amazon.sa/s?k=levis+jeans&rh=p_8%3A30-99", "👔 Levis Jeans", 'search'),
+    ("https://www.amazon.sa/s?k=wrangler+jeans&rh=p_8%3A30-99", "👔 Wrangler Jeans", 'search'),
+    ("https://www.amazon.sa/s?k=diesel&rh=p_8%3A30-99", "👔 Diesel", 'search'),
+    ("https://www.amazon.sa/s?k=g+star&rh=p_8%3A30-99", "👔 G-Star", 'search'),
+    
+    ("https://www.amazon.sa/s?k=michael+kors+bag&rh=p_8%3A30-99", "👜 MK Bags", 'search'),
+    ("https://www.amazon.sa/s?k=kate+spade&rh=p_8%3A30-99", "👜 Kate Spade", 'search'),
+    ("https://www.amazon.sa/s?k=coach+bag&rh=p_8%3A30-99", "👜 Coach", 'search'),
+    ("https://www.amazon.sa/s?k=guess+bag&rh=p_8%3A30-99", "👜 Guess", 'search'),
+    ("https://www.amazon.sa/s?k=fossil+bag&rh=p_8%3A30-99", "👜 Fossil Bag", 'search'),
+    ("https://www.amazon.sa/s?k=vera+bradley&rh=p_8%3A30-99", "👜 Vera Bradley", 'search'),
+    
+    ("https://www.amazon.sa/s?k=swarovski&rh=p_8%3A30-99", "💎 Swarovski", 'search'),
+    ("https://www.amazon.sa/s?k=pandora&rh=p_8%3A30-99", "💎 Pandora", 'search'),
+    ("https://www.amazon.sa/s?k=tiffany&rh=p_8%3A30-99", "💎 Tiffany", 'search'),
+    ("https://www.amazon.sa/s?k=cartier&rh=p_8%3A30-99", "💎 Cartier", 'search'),
+    ("https://www.amazon.sa/s?k=bulova&rh=p_8%3A30-99", "💎 Bulova", 'search'),
+    ("https://www.amazon.sa/s?k=anne+klein&rh=p_8%3A30-99", "💎 Anne Klein", 'search'),
+    
+    ("https://www.amazon.sa/s?k=ray+ban&rh=p_8%3A30-99", "🕶️ Ray Ban", 'search'),
+    ("https://www.amazon.sa/s?k=oakley&rh=p_8%3A30-99", "🕶️ Oakley", 'search'),
+    ("https://www.amazon.sa/s?k=persol&rh=p_8%3A30-99", "🕶️ Persol", 'search'),
+    ("https://www.amazon.sa/s?k=prada+sunglasses&rh=p_8%3A30-99", "🕶️ Prada", 'search'),
+    ("https://www.amazon.sa/s?k=gucci+sunglasses&rh=p_8%3A30-99", "🕶️ Gucci Sun", 'search'),
+    ("https://www.amazon.sa/s?k=burberry+sunglasses&rh=p_8%3A30-99", "🕶️ Burberry Sun", 'search'),
+    
+    ("https://www.amazon.sa/s?k=mac+makeup&rh=p_8%3A30-99", "💄 MAC", 'search'),
+    ("https://www.amazon.sa/s?k=nyx+makeup&rh=p_8%3A30-99", "💄 NYX", 'search'),
+    ("https://www.amazon.sa/s?k=maybelline+makeup&rh=p_8%3A30-99", "💄 Maybelline", 'search'),
+    ("https://www.amazon.sa/s?k=loreal+makeup&rh=p_8%3A30-99", "💄 L'Oreal", 'search'),
+    ("https://www.amazon.sa/s?k=revlon&rh=p_8%3A30-99", "💄 Revlon", 'search'),
+    ("https://www.amazon.sa/s?k=covergirl&rh=p_8%3A30-99", "💄 Covergirl", 'search'),
+    ("https://www.amazon.sa/s?k=bobbi+brown&rh=p_8%3A30-99", "💄 Bobbi Brown", 'search'),
+    ("https://www.amazon.sa/s?k=anastasia&rh=p_8%3A30-99", "💄 Anastasia", 'search'),
+    ("https://www.amazon.sa/s?k=huda+beauty&rh=p_8%3A30-99", "💄 Huda Beauty", 'search'),
+    ("https://www.amazon.sa/s?k=fenty+beauty&rh=p_8%3A30-99", "💄 Fenty", 'search'),
+    
+    ("https://www.amazon.sa/s?k=olay&rh=p_8%3A30-99", "💆 Olay", 'search'),
+    ("https://www.amazon.sa/s?k=neutrogena&rh=p_8%3A30-99", "💆 Neutrogena", 'search'),
+    ("https://www.amazon.sa/s?k=cerave&rh=p_8%3A30-99", "💆 CeraVe", 'search'),
+    ("https://www.amazon.sa/s?k=cetaphil&rh=p_8%3A30-99", "💆 Cetaphil", 'search'),
+    ("https://www.amazon.sa/s?k=la+roche+posay&rh=p_8%3A30-99", "💆 La Roche", 'search'),
+    ("https://www.amazon.sa/s?k=vichy&rh=p_8%3A30-99", "💆 Vichy", 'search'),
+    ("https://www.amazon.sa/s?k=eucerin&rh=p_8%3A30-99", "💆 Eucerin", 'search'),
+    ("https://www.amazon.sa/s?k=aveeno&rh=p_8%3A30-99", "💆 Aveeno", 'search'),
+    ("https://www.amazon.sa/s?k=bioderma&rh=p_8%3A30-99", "💆 Bioderma", 'search'),
+    
+    ("https://www.amazon.sa/s?k=pampers&rh=p_8%3A30-99", "👶 Pampers", 'search'),
+    ("https://www.amazon.sa/s?k=huggies&rh=p_8%3A30-99", "👶 Huggies", 'search'),
+    ("https://www.amazon.sa/s?k=johnson+baby&rh=p_8%3A30-99", "👶 Johnson's", 'search'),
+    ("https://www.amazon.sa/s?k=mustela&rh=p_8%3A30-99", "👶 Mustela", 'search'),
+    ("https://www.amazon.sa/s?k=aveeno+baby&rh=p_8%3A30-99", "👶 Aveeno Baby", 'search'),
+    ("https://www.amazon.sa/s?k=lego&rh=p_8%3A30-99", "🧱 LEGO", 'search'),
+    ("https://www.amazon.sa/s?k=barbie&rh=p_8%3A30-99", "👸 Barbie", 'search'),
+    ("https://www.amazon.sa/s?k=hot+wheels&rh=p_8%3A30-99", "🚗 Hot Wheels", 'search'),
+    ("https://www.amazon.sa/s?k=fisher+price&rh=p_8%3A30-99", "🎠 Fisher Price", 'search'),
+    ("https://www.amazon.sa/s?k=little+tikes&rh=p_8%3A30-99", "🎪 Little Tikes", 'search'),
+    ("https://www.amazon.sa/s?k=playskool&rh=p_8%3A30-99", "🎨 Playskool", 'search'),
+    ("https://www.amazon.sa/s?k=vtech&rh=p_8%3A30-99", "🔤 VTech", 'search'),
+    ("https://www.amazon.sa/s?k=leapfrog&rh=p_8%3A30-99", "🐸 LeapFrog", 'search'),
+    
+    ("https://www.amazon.sa/s?k=fitness+equipment&rh=p_8%3A30-99", "🏋️ Fitness", 'search'),
+    ("https://www.amazon.sa/s?k=yoga+mat&rh=p_8%3A30-99", "🧘 Yoga Mat", 'search'),
+    ("https://www.amazon.sa/s?k=dumbbells&rh=p_8%3A30-99", "🏋️ Dumbbells", 'search'),
+    ("https://www.amazon.sa/s?k=kettlebell&rh=p_8%3A30-99", "🏋️ Kettlebell", 'search'),
+    ("https://www.amazon.sa/s?k=resistance+bands&rh=p_8%3A30-99", "🏋️ Resistance", 'search'),
+    ("https://www.amazon.sa/s?k=treadmill&rh=p_8%3A30-99", "🏃 Treadmill", 'search'),
+    ("https://www.amazon.sa/s?k=exercise+bike&rh=p_8%3A30-99", "🚴 Exercise Bike", 'search'),
+    ("https://www.amazon.sa/s?k=elliptical&rh=p_8%3A30-99", "🏃 Elliptical", 'search'),
+    ("https://www.amazon.sa/s?k=protein+powder&rh=p_8%3A30-99", "💪 Protein", 'search'),
+    ("https://www.amazon.sa/s?k=bcaa&rh=p_8%3A30-99", "💪 BCAA", 'search'),
+    ("https://www.amazon.sa/s?k=creatine&rh=p_8%3A30-99", "💪 Creatine", 'search'),
+    ("https://www.amazon.sa/s?k=pre+workout&rh=p_8%3A30-99", "💪 Pre Workout", 'search'),
+    ("https://www.amazon.sa/s?k=optimum+nutrition&rh=p_8%3A30-99", "💪 ON", 'search'),
+    ("https://www.amazon.sa/s?k=muscletech&rh=p_8%3A30-99", "💪 MuscleTech", 'search'),
+    ("https://www.amazon.sa/s?k=dymatize&rh=p_8%3A30-99", "💪 Dymatize", 'search'),
+    ("https://www.amazon.sa/s?k=bpi+sports&rh=p_8%3A30-99", "💪 BPI", 'search'),
+    
+    ("https://www.amazon.sa/s?k=philips+air+fryer&rh=p_8%3A30-99", "🏠 Philips AirFryer", 'search'),
+    ("https://www.amazon.sa/s?k=ninja+blender&rh=p_8%3A30-99", "🥤 Ninja", 'search'),
+    ("https://www.amazon.sa/s?k=nespresso&rh=p_8%3A30-99", "☕ Nespresso", 'search'),
+    ("https://www.amazon.sa/s?k=delonghi&rh=p_8%3A30-99", "☕ DeLonghi", 'search'),
+    ("https://www.amazon.sa/s?k=breville&rh=p_8%3A30-99", "🏠 Breville", 'search'),
+    ("https://www.amazon.sa/s?k=kenwood&rh=p_8%3A30-99", "🏠 Kenwood", 'search'),
+    ("https://www.amazon.sa/s?k=kitchenaid&rh=p_8%3A30-99", "🏠 KitchenAid", 'search'),
+    ("https://www.amazon.sa/s?k=cuisinart&rh=p_8%3A30-99", "🏠 Cuisinart", 'search'),
+    ("https://www.amazon.sa/s?k=tupperware&rh=p_8%3A30-99", "🥣 Tupperware", 'search'),
+    ("https://www.amazon.sa/s?k=pyrex&rh=p_8%3A30-99", "🍽️ Pyrex", 'search'),
+    ("https://www.amazon.sa/s?k=corelle&rh=p_8%3A30-99", "🍽️ Corelle", 'search'),
+    ("https://www.amazon.sa/s?k=dyson+vacuum&rh=p_8%3A30-99", "🏠 Dyson", 'search'),
+    ("https://www.amazon.sa/s?k=irobot&rh=p_8%3A30-99", "🏠 iRobot", 'search'),
+    ("https://www.amazon.sa/s?k=ecovacs&rh=p_8%3A30-99", "🏠 Ecovacs", 'search'),
+    ("https://www.amazon.sa/s?k=braun+blender&rh=p_8%3A30-99", "🏠 Braun", 'search'),
+    
+    ("https://www.amazon.sa/s?k=bosch+tools&rh=p_8%3A30-99", "🔧 Bosch", 'search'),
+    ("https://www.amazon.sa/s?k=makita&rh=p_8%3A30-99", "🔧 Makita", 'search'),
+    ("https://www.amazon.sa/s?k=dewalt&rh=p_8%3A30-99", "🔧 DeWalt", 'search'),
+    ("https://www.amazon.sa/s?k=black+decker&rh=p_8%3A30-99", "🔧 Black & Decker", 'search'),
+    ("https://www.amazon.sa/s?k=stanley&rh=p_8%3A30-99", "🔧 Stanley", 'search'),
+    ("https://www.amazon.sa/s?k=craftsman&rh=p_8%3A30-99", "🔧 Craftsman", 'search'),
+    ("https://www.amazon.sa/s?k=ryobi&rh=p_8%3A30-99", "🔧 Ryobi", 'search'),
+    ("https://www.amazon.sa/s?k=worx&rh=p_8%3A30-99", "🔧 Worx", 'search'),
+    
+    ("https://www.amazon.sa/s?k=michelin+tires&rh=p_8%3A30-99", "🚗 Michelin", 'search'),
+    ("https://www.amazon.sa/s?k=bridgestone+tires&rh=p_8%3A30-99", "🚗 Bridgestone", 'search'),
+    ("https://www.amazon.sa/s?k=goodyear+tires&rh=p_8%3A30-99", "🚗 Goodyear", 'search'),
+    ("https://www.amazon.sa/s?k=pirelli&rh=p_8%3A30-99", "🚗 Pirelli", 'search'),
+    ("https://www.amazon.sa/s?k=continental+tires&rh=p_8%3A30-99", "🚗 Continental", 'search'),
+    ("https://www.amazon.sa/s?k=bosch+car&rh=p_8%3A30-99", "🚗 Bosch Car", 'search'),
+    ("https://www.amazon.sa/s?k=shell+oil&rh=p_8%3A30-99", "🚗 Shell", 'search'),
+    ("https://www.amazon.sa/s?k=mobil+1&rh=p_8%3A30-99", "🚗 Mobil 1", 'search'),
+    ("https://www.amazon.sa/s?k=castrol&rh=p_8%3A30-99", "🚗 Castrol", 'search'),
+    
+    ("https://www.amazon.sa/s?k=kindle&rh=p_8%3A30-99", "📚 Kindle", 'search'),
+    ("https://www.amazon.sa/s?k=harry+potter+book&rh=p_8%3A30-99", "📚 Harry Potter", 'search'),
+    
+    ("https://www.amazon.sa/s?k=dates&rh=p_8%3A30-99", "🌴 Dates", 'search'),
+    ("https://www.amazon.sa/s?k=oud&rh=p_8%3A30-99", "🌿 Oud", 'search'),
+    ("https://www.amazon.sa/s?k=bakhoor&rh=p_8%3A30-99", "🌿 Bakhoor", 'search'),
+    ("https://www.amazon.sa/s?k=prayer+mat&rh=p_8%3A30-99", "🕌 Prayer Mat", 'search'),
+    ("https://www.amazon.sa/s?k=thobe&rh=p_8%3A30-99", "👘 Thobe", 'search'),
+    ("https://www.amazon.sa/s?k=abaya&rh=p_8%3A30-99", "🧕 Abaya", 'search'),
+    ("https://www.amazon.sa/s?k=ramadan&rh=p_8%3A30-99", "🌙 Ramadan", 'search'),
+    ("https://www.amazon.sa/s?k=eid&rh=p_8%3A30-99", "🎉 Eid", 'search'),
+    ("https://www.amazon.sa/s?k=hajj&rh=p_8%3A30-99", "🕋 Hajj", 'search'),
+    ("https://www.amazon.sa/s?k=umrah&rh=p_8%3A30-99", "🕋 Umrah", 'search'),
+    
+    ("https://www.amazon.sa/s?k=louis+vuitton&rh=p_8%3A30-99", "👜 LV", 'search'),
+    ("https://www.amazon.sa/s?k=hermes&rh=p_8%3A30-99", "👜 Hermes", 'search'),
+    ("https://www.amazon.sa/s?k=coach&rh=p_8%3A30-99", "👜 Coach", 'search'),
+    ("https://www.amazon.sa/s?k=kate+spade&rh=p_8%3A30-99", "👜 Kate Spade", 'search'),
+    ("https://www.amazon.sa/s?k=burberry+bag&rh=p_8%3A30-99", "👜 Burberry", 'search'),
+    ("https://www.amazon.sa/s?k=longchamp&rh=p_8%3A30-99", "👜 Longchamp", 'search'),
+    ("https://www.amazon.sa/s?k=tumi&rh=p_8%3A30-99", "🧳 Tumi", 'search'),
+    ("https://www.amazon.sa/s?k=samsonite&rh=p_8%3A30-99", "🧳 Samsonite", 'search'),
+    ("https://www.amazon.sa/s?k=rimowa&rh=p_8%3A30-99", "🧳 Rimowa", 'search'),
+]
 
+def search_all_deals(chat_id, status_message_id):
+    all_deals = []
+    session = create_session()
+    
+    if not page_rotator.all_pages:
+        page_rotator.generate_all_pages(CATEGORIES_DEF)
+        page_rotator.load_state()
+    
+    # البحث في دفعات حتى نحصل على 40 نتيجة مميزة
+    batch_size = 50
+    max_attempts = 10  # عدد محاولات البحث لضمان الحصول على 40 نتيجة
+    
+    for attempt in range(max_attempts):
+        if len(all_deals) >= TARGET_DEALS_COUNT * 3:  # نجمع أكثر لنضمن جودة التصفية
+            break
+            
+        pages_to_search = page_rotator.get_next_batch(batch_size)
+        
+        if not pages_to_search:
+            logger.error("No pages available for search")
+            break
+        
+        total_pages = len(pages_to_search)
+        processed = 0
+        
+        for page_info in pages_to_search:
+            try:
+                processed += 1
+                
+                if processed % 5 == 0:
+                    stats = page_rotator.get_stats()
+                    progress = f"⏳ جاري البحث... ({processed}/{total_pages} صفحة)\n📍 {page_info['category']} - صفحة {page_info['page_num']}\n🔄 دورة: {stats['rotation_count']}\n✅ تم جمع: {len(all_deals)} صفقة"
+                    try:
+                        updater.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=status_message_id,
+                            text=progress
+                        )
+                    except:
+                        pass
+                
+                logger.info(f"🔍 [{page_info['category']}] Page {page_info['page_num']}")
+                html = fetch_page(session, page_info['url'])
+                if not html:
+                    continue
+                
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                items = []
+                if 'best_sellers' in page_info['type']:
+                    items.extend(soup.find_all('li', class_='zg-item-immersion'))
+                    items.extend(soup.find_all('div', class_='p13n-sc-uncoverable-faceout'))
+                
+                items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
+                items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
+                items.extend(soup.find_all('div', class_='s-result-item'))
+                items.extend(soup.find_all('div', class_='a-section'))
+                
+                logger.info(f"   Found {len(items)} items")
+                
+                for item in items:
+                    try:
+                        deal = parse_item(item, page_info['category'], 'best_sellers' in page_info['type'])
+                        if deal and is_valid_deal(deal):
+                            all_deals.append(deal)
+                    except:
+                        continue
+                
+                time.sleep(random.uniform(1.5, 3))
+                
+            except Exception as e:
+                logger.error(f"Error in {page_info['category']}: {e}")
+        
+        logger.info(f"✅ Attempt {attempt+1}: Collected {len(all_deals)} valid deals")
+    
+    stats = page_rotator.get_stats()
+    logger.info(f"✅ Total collected: {len(all_deals)} deals | Progress: {stats['progress_percent']:.1f}%")
+    return all_deals
 
-# ================== Commands ==================
-def start_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "👋 *بوت عروض أمازون السعودية* 🇸🇦\n\n"
-        "🔍 *يدور في أقسام عامة واسعة:*\n"
-        "• Deals + Best Sellers (كل الكاتيجوريز)\n"
-        "• Electronics, Beauty, Perfumes, Home\n"
-        "• Automotive, Baby, Sports, Grocery\n"
-        "• Fashion, Toys, Smart Home, Health...\n\n"
-        "📊 *في نهاية كل بحث:*\n"
-        "أكتر 25 منتج شراءً في السعودية\n\n"
-        "اكتب *Hi* للبدء!", parse_mode='Markdown')
+def is_valid_deal(deal):
+    """التحقق من شروط الصفقة: خصم >50% وتقييم >3.5"""
+    # التحقق من الخصم
+    if deal['discount'] < MIN_DISCOUNT:
+        return False
+    
+    # التحقق من التقييم
+    if deal['rating'] < MIN_RATING:
+        return False
+    
+    # التحقق من السعر المنطقي
+    if deal['price'] <= 0 or deal['price'] > 10000:
+        return False
+    
+    return True
 
-def hi_cmd(update: Update, context: CallbackContext):
-    global is_scanning
-    if is_scanning:
-        update.message.reply_text("⏳ البوت شغال... استنى!")
-        return
-    is_scanning = True
-    chat_id    = update.effective_chat.id
-    status_msg = update.message.reply_text(
-        "🔍 *بدأت البحث...*\n📄 بدور في كل الأقسام العامة\n"
-        "⏳ *الوقت المتوقع: 10-15 دقيقة*\n\n"
-        "📊 *في النهاية: أكتر 25 منتج شراءً*",
-        parse_mode='Markdown')
+def parse_item(item, category, is_best_seller):
+    price = None
+    for sel in ['.a-price-whole', '.a-price .a-offscreen', '.a-price-range', '.a-price']:
+        el = item.select_one(sel)
+        if el:
+            try:
+                txt = el.text.replace(',', '').replace('ريال', '').strip()
+                match = re.search(r'[\d,]+\.?\d*', txt)
+                if match:
+                    price = float(match.group().replace(',', ''))
+                    break
+            except:
+                pass
+    
+    if not price or price <= 0:
+        return None
+    
+    old_price = 0
+    discount = 0
+    
+    old_el = item.find('span', class_='a-text-price')
+    if old_el:
+        txt = old_el.get_text()
+        match = re.search(r'[\d,]+\.?\d*', txt.replace(',', ''))
+        if match:
+            try:
+                old_price = float(match.group())
+                if old_price > price:
+                    discount = int(((old_price - price) / old_price) * 100)
+            except:
+                pass
+    
+    if discount == 0:
+        badge = item.find(string=re.compile(r'(\d+)%'))
+        if badge:
+            match = re.search(r'(\d+)', str(badge))
+            if match:
+                discount = int(match.group())
+                old_price = price / (1 - discount/100)
+    
+    title = "Unknown"
+    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated', '.a-size-medium']:
+        el = item.select_one(sel)
+        if el:
+            title = el.text.strip()
+            if len(title) > 5:
+                break
+    
+    link = ""
+    a = item.find('a', href=True)
+    if a:
+        href = a['href']
+        if href.startswith('/'):
+            link = f"https://www.amazon.sa{href}"
+        elif 'amazon.sa' in href:
+            link = href
+        else:
+            asin = extract_asin(href)
+            if asin:
+                link = f"https://www.amazon.sa/dp/{asin}"
+    
+    img = ""
+    for sel in ['img.s-image', 'img[src]', '.s-image']:
+        el = item.select_one(sel)
+        if el:
+            img = el.get('src', '') or el.get('data-src', '') or el.get('data-lazy-src', '')
+            if img.startswith('http'):
+                break
+    
+    rating = 0
+    reviews = 0
+    
+    rate_el = item.find('span', class_='a-icon-alt')
+    if rate_el:
+        rating = parse_rating(rate_el.text)
+    
+    rev_el = item.find('span', class_='a-size-base')
+    if rev_el:
+        match = re.search(r'[\d,]+', rev_el.text)
+        if match:
+            try:
+                reviews = int(match.group().replace(',', ''))
+            except:
+                pass
+    
+    return {
+        'title': title,
+        'price': price,
+        'old_price': round(old_price, 2),
+        'discount': discount,
+        'rating': rating,
+        'reviews': reviews,
+        'link': link,
+        'image': img,
+        'category': category,
+        'is_best_seller': is_best_seller,
+        'id': get_product_id({'title': title, 'link': link, 'price': price})
+    }
+
+def filter_premium_deals(deals):
+    """اختيار 40 نتيجة عشوائية مميزة بدون تكرار"""
+    filtered = []
+    seen_ids = set()
+    
+    # ترتيب عشوائي للنتائج
+    random.shuffle(deals)
+    
+    for deal in deals:
+        deal_id = deal['id']
+        
+        # التأكد من عدم التكرار في هذه الدفعة
+        if deal_id in seen_ids:
+            continue
+        
+        # التأكد من عدم الإرسال سابقاً
+        if deal_id in sent_products:
+            continue
+        
+        # التأكد من عدم التشابه
+        if is_similar_product(deal['title']):
+            continue
+        
+        seen_ids.add(deal_id)
+        
+        # تحديد نوع الصفقة
+        if deal['price'] < 1:
+            deal['type'] = '🔥 GLITCH'
+        elif 'Warehouse' in deal['category']:
+            deal['type'] = '🏭 WAREHOUSE'
+        elif 'Outlet' in deal['category']:
+            deal['type'] = '🎁 OUTLET'
+        elif 'Coupon' in deal['category']:
+            deal['type'] = '🎟️ COUPON'
+        elif 'Prime' in deal['category']:
+            deal['type'] = '👑 PRIME'
+        elif 'Lightning' in deal['category']:
+            deal['type'] = '⚡ LIGHTNING'
+        elif deal.get('is_best_seller'):
+            deal['type'] = '⭐ BEST SELLER'
+        else:
+            deal['type'] = f'💰 {deal["discount"]}%'
+        
+        deal['savings'] = round(deal['old_price'] - deal['price'], 2) if deal['old_price'] > 0 else 0
+        filtered.append(deal)
+        
+        # التوقف عند الوصول للهدف
+        if len(filtered) >= TARGET_DEALS_COUNT:
+            break
+    
+    # ترتيب النهائي حسب الأولوية
+    filtered.sort(key=lambda x: (
+        0 if x['type'] == '🔥 GLITCH' else 1,
+        0 if x['type'] == '🏭 WAREHOUSE' else 1,
+        0 if x['type'] == '⚡ LIGHTNING' else 1,
+        0 if x.get('is_best_seller') else 1,
+        -x['discount']
+    ))
+    
+    return filtered
+
+def send_deals(deals, chat_id, status_message_id):
+    global sent_products, sent_hashes, is_scanning
+    
     try:
-        search_all_deals(chat_id, status_msg.message_id)
-        try: updater.bot.delete_message(chat_id, status_msg.message_id)
-        except: pass
-        updater.bot.send_message(
-            chat_id=chat_id,
-            text="✅ *خلصت البحث!*\n🔥 العروض اتبعتت\n📊 تقرير الترندينج اتبعت\n\nاكتب *Hi* لبحث جديد!",
-            parse_mode='Markdown')
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        update.message.reply_text(f"❌ خطأ: {str(e)[:100]}")
+        try:
+            updater.bot.delete_message(chat_id, status_message_id)
+        except:
+            pass
+        
+        if not deals:
+            msg = "❌ *لا توجد عروض جديدة*\n\nجرب تاني بعدين!"
+            updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+            return
+        
+        stats = page_rotator.get_stats()
+        
+        bs = sum(1 for d in deals if d.get('is_best_seller'))
+        glitch = sum(1 for d in deals if d['type'] == '🔥 GLITCH')
+        warehouse = sum(1 for d in deals if d['type'] == '🏭 WAREHOUSE')
+        outlet = sum(1 for d in deals if d['type'] == '🎁 OUTLET')
+        lightning = sum(1 for d in deals if d['type'] == '⚡ LIGHTNING')
+        
+        summary = f"""
+🎯 *{len(deals)} صفقة ممتازة!*
+
+📊 *تقدم البحث:* {stats['progress_percent']:.1f}%
+🔄 *دورة التدوير:* {stats['rotation_count']}
+
+🔥 Glitch: {glitch}
+🏭 Warehouse: {warehouse}
+🎁 Outlet: {outlet}
+⚡ Lightning: {lightning}
+⭐ Best Sellers: {bs}
+💰 خصومات عادية: {len(deals)-bs-glitch-warehouse-outlet-lightning}
+
+📉 *الحد الأدنى للخصم:* {MIN_DISCOUNT}%
+⭐ *الحد الأدنى للتقييم:* {MIN_RATING} نجمة
+        """
+        updater.bot.send_message(chat_id=chat_id, text=summary, parse_mode='Markdown')
+        
+        for i, d in enumerate(deals, 1):
+            savings = f"💵 توفير: {d['savings']:.2f} ريال\n" if d['savings'] > 0 else ""
+            old = f"🏷️ قبل: {d['old_price']:.2f} ريال\n" if d['old_price'] > 0 else ""
+            rev = f"📝 {d['reviews']:,} مراجعة\n" if d['reviews'] > 0 else ""
+            
+            msg = f"""
+{d['type']} *#{i}*
+
+📦 {d['title'][:120]}
+
+💵 *{d['price']:.2f} ريال*
+{old}{savings}📉 خصم: {d['discount']}%
+⭐ تقييم: {d['rating']}/5
+{rev}📍 {d['category']}
+
+🔗 [Amazon]({d['link']})
+            """
+            
+            try:
+                if d['image'].startswith('http'):
+                    updater.bot.send_photo(chat_id=chat_id, photo=d['image'], caption=msg, parse_mode='Markdown')
+                else:
+                    updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+                
+                sent_products.add(d['id'])
+                sent_hashes.add(create_title_hash(d['title']))
+                time.sleep(1.5)
+                
+            except Exception as e:
+                logger.error(f"Error #{i}: {e}")
+                try:
+                    updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+                    sent_products.add(d['id'])
+                    time.sleep(1.5)
+                except:
+                    pass
+        
+        save_database()
+        logger.info(f"✅ Done! Sent {len(deals)} deals. Total: {len(sent_products)}")
+        
     finally:
         is_scanning = False
 
+def start_cmd(update: Update, context: CallbackContext):
+    update.message.reply_text(f"""
+👋 *أهلاً بيك في Amazon Deals Bot!*
+
+🎯 أنا ببحث في:
+• 200+ قسم شامل 📁
+• 500+ صفحة 📄
+• *تدوير ذكي للصفحات* 🔄
+• عروض Warehouse المخفية 🏭
+• Outlet & Clearance 🎁
+• Lightning Deals ⚡
+• Prime Exclusives 👑
+• Best Sellers ⭐
+• براندات فاخرة 💎
+
+🔥 *شروط العرض:*
+• خصم فوق {MIN_DISCOUNT}%
+• تقييم فوق {MIN_RATING} نجمة
+
+اكتب *Hi* عشان تبدأ البحث!
+    """, parse_mode='Markdown')
+
+def hi_cmd(update: Update, context: CallbackContext):
+    global is_scanning
+    
+    chat_id = update.effective_chat.id
+    
+    if is_scanning:
+        update.message.reply_text("⏳ أنا ببحث دلوقتي... استنى شوية!")
+        return
+    
+    is_scanning = True
+    
+    if not page_rotator.all_pages:
+        page_rotator.generate_all_pages(CATEGORIES_DEF)
+        page_rotator.load_state()
+    
+    stats = page_rotator.get_stats()
+    
+    status_msg = update.message.reply_text(
+        f"🔍 *بدأت البحث عن {TARGET_DEALS_COUNT} صفقة مميزة...*\n"
+        f"📊 التقدم: {stats['progress_percent']:.1f}%\n"
+        f"🔄 الدورة: {stats['rotation_count']}\n"
+        f"📉 الحد الأدنى للخصم: {MIN_DISCOUNT}%\n"
+        f"⭐ الحد الأدنى للتقييم: {MIN_RATING}\n"
+        f"⏱️ 5-10 دقائق", 
+        parse_mode='Markdown'
+    )
+    
+    try:
+        load_database()
+        deals = search_all_deals(chat_id, status_msg.message_id)
+        premium = filter_premium_deals(deals)
+        send_deals(premium, chat_id, status_msg.message_id)
+    except Exception as e:
+        logger.error(f"Search error: {e}")
+        is_scanning = False
+        try:
+            updater.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg.message_id,
+                text="❌ حصل خطأ! جرب تاني."
+            )
+        except:
+            update.message.reply_text("❌ حصل خطأ! جرب تاني.")
+
 def status_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        f"✅ *البوت شغال*\n\n"
-        f"📁 أقسام: *{len(CATEGORIES_DEF)}*\n"
-        f"📦 منتجات: *{len(sent_products)}*\n"
-        f"📉 حد الخصم: *{MIN_DISCOUNT}%+*\n"
-        f"⭐ حد التقييم: *{MIN_RATING}+*\n"
-        f"💬 حد الترندينج: *{TRENDING_MIN_REVIEWS}+ مراجعة*\n\n"
-        f"اكتب *Hi* للبدء!", parse_mode='Markdown')
+    stats = page_rotator.get_stats()
+    update.message.reply_text(f"""
+📊 *حالة البوت:*
 
+📦 منتجات مخزنة: {len(sent_products)}
+🔍 بحوث متنوعة: {len(sent_hashes)}
+📁 الأقسام: 200+
+📄 إجمالي الصفحات: {stats['total_pages']}
+✅ الصفحات المزارة: {stats['visited_pages']}
+⏳ الصفحات المتبقية: {stats['remaining_pages']}
+📈 نسبة التقدم: {stats['progress_percent']:.1f}%
+🔄 دورة التدوير: {stats['rotation_count']}
+⏰ التوقيت: {datetime.now().strftime('%H:%M:%S')}
 
-# ================== Run ==================
-def start_bot():
-    global updater
-    load_database()
-    updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start",  start_cmd))
-    dp.add_handler(CommandHandler("status", status_cmd))
-    dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$') & Filters.text, hi_cmd))
-    logger.info(f"🤖 Bot started | {len(CATEGORIES_DEF)} categories")
-    updater.start_polling(drop_pending_updates=True, timeout=30)
-    updater.idle()
+🎯 *إعدادات البحث:*
+• عدد النتائج: {TARGET_DEALS_COUNT}
+• الحد الأدنى للخصم: {MIN_DISCOUNT}%
+• الحد الأدنى للتقييم: {MIN_RATING}
+
+✅ البوت شغال بكفاءة!
+    """, parse_mode='Markdown')
+
+def clear_cmd(update: Update, context: CallbackContext):
+    global sent_products, sent_hashes
+    sent_products.clear()
+    sent_hashes.clear()
+    page_rotator.visited_pages.clear()
+    page_rotator.rotation_count = 0
+    page_rotator.save_state()
+    save_database()
+    update.message.reply_text("🗑️ *تم مسح كل البيانات!*\n\nالآن البوت هيبدأ من جديد.", parse_mode='Markdown')
+
+def reset_rotation_cmd(update: Update, context: CallbackContext):
+    page_rotator.visited_pages.clear()
+    page_rotator.rotation_count = 0
+    page_rotator.save_state()
+    update.message.reply_text("🔄 *تم إعادة تعيين التدوير!*\n\nسيبدأ البحث من الصفحة الأولى مرة أخرى.", parse_mode='Markdown')
+
+def unknown(update: Update, context: CallbackContext):
+    update.message.reply_text("🤔 *مش فاهم!*\n\nاكتب:\n• *Hi* للبحث عن عروض\n• /start للمساعدة\n• /status للحالة\n• /reset_rotation لإعادة التدوير", parse_mode='Markdown')
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        stats = page_rotator.get_stats()
+        response = json.dumps({
+            "status": "ok",
+            "products": len(sent_products),
+            "timestamp": datetime.now().isoformat(),
+            "categories": 200,
+            "pages": stats['total_pages'],
+            "visited_pages": stats['visited_pages'],
+            "progress": stats['progress_percent'],
+            "rotation_count": stats['rotation_count'],
+            "target_deals": TARGET_DEALS_COUNT,
+            "min_discount": MIN_DISCOUNT,
+            "min_rating": MIN_RATING
+        })
+        self.wfile.write(response.encode())
+    
+    def log_message(self, format, *args):
+        pass
+
+def run_health_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
+    logger.info(f"🌐 Health server running on port {PORT}")
+    server.serve_forever()
 
 def main():
-    threading.Thread(target=run_health_server, daemon=True).start()
-    time.sleep(2)
-    while True:
-        try:    start_bot()
-        except Exception as e:
-            logger.error(f"Crash: {e}")
-            time.sleep(5)
+    global updater
+    
+    load_database()
+    page_rotator.generate_all_pages(CATEGORIES_DEF)
+    page_rotator.load_state()
+    
+    stats = page_rotator.get_stats()
+    logger.info(f"🚀 Starting | Products: {len(sent_products)} | Pages: {stats['total_pages']} | Visited: {stats['visited_pages']}")
+    
+    health_thread = threading.Thread(target=run_health_server, daemon=True)
+    health_thread.start()
+    
+    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+    
+    dp.add_handler(CommandHandler("start", start_cmd))
+    dp.add_handler(CommandHandler("status", status_cmd))
+    dp.add_handler(CommandHandler("clear", clear_cmd))
+    dp.add_handler(CommandHandler("reset_rotation", reset_rotation_cmd))
+    dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$'), hi_cmd))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, unknown))
+    
+    logger.info("🤖 Bot starting with page rotation...")
+    updater.start_polling(drop_pending_updates=True)
+    updater.idle()
 
 if __name__ == "__main__":
     main()
