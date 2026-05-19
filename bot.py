@@ -51,15 +51,12 @@ def health():
 def run_flask():
     app.run(host='0.0.0.0', port=PORT)
 
-
-# ========== Keep-Alive Ping (منع النوم على Render) ==========
+# ========== Keep-Alive Ping ==========
 def keep_alive_ping():
     """يرسل ping كل 10 دقايق عشان Render ما ينامش"""
     while True:
         try:
-            time.sleep(600)  # 10 دقايق
-            # Render بيحتاج request على الـ port كل 15 دقيقة
-            # الـ Flask server شغال على نفس الـ process فده كفاية
+            time.sleep(600)
             logger.info("💓 Keep-alive ping")
         except Exception as e:
             logger.error(f"Keep-alive error: {e}")
@@ -71,6 +68,9 @@ sent_products = set()
 sent_hashes = set()
 is_scanning = False
 updater = None
+
+# Global flag to stop search
+stop_search_flag = False
 
 # ========== إعدادات البحث ==========
 TARGET_DEALS_COUNT = 80      # عدد النتائج المطلوبة في كل مرة
@@ -625,6 +625,11 @@ def search_all_deals(chat_id, status_message_id):
     max_attempts = 15  # عدد محاولات البحث لضمان الحصول على 40 نتيجة
     
     for attempt in range(max_attempts):
+        # Check if user sent stop signal
+        if stop_search_flag:
+            logger.info("🛑 Search stopped by user")
+            break
+
         if len(all_deals) >= TARGET_DEALS_COUNT * 3:  # نجمع أكثر لنضمن جودة التصفية
             break
             
@@ -638,6 +643,11 @@ def search_all_deals(chat_id, status_message_id):
         processed = 0
         
         for page_info in pages_to_search:
+            # Check stop signal
+            if stop_search_flag:
+                logger.info("🛑 Search stopped during page processing")
+                break
+
             try:
                 processed += 1
                 
@@ -926,38 +936,31 @@ def send_deals(deals, chat_id, status_message_id):
             """
             
             try:
-                # إرسال نص فقط بدون صور وبدون preview
-                updater.bot.send_message(
-                    chat_id=chat_id,
-                    text=msg,
-                    parse_mode='Markdown',
-                    disable_web_page_preview=True
-                )
-
+                if d['image'].startswith('http'):
+                    updater.bot.send_photo(chat_id=chat_id, photo=d['image'], caption=msg, parse_mode='Markdown')
+                else:
+                    updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+                
                 sent_products.add(d['id'])
                 sent_hashes.add(create_title_hash(d['title']))
                 time.sleep(1.5)
-
+                
             except Exception as e:
                 logger.error(f"Error #{i}: {e}")
                 try:
-                    updater.bot.send_message(
-                        chat_id=chat_id,
-                        text=msg,
-                        parse_mode='Markdown',
-                        disable_web_page_preview=True
-                    )
+                    updater.bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
                     sent_products.add(d['id'])
-                    time.sleep(5)
+                    time.sleep(1.5)
                 except:
-                    pass
                     pass
         
         save_database()
         logger.info(f"✅ Done! Sent {len(deals)} deals. Total: {len(sent_products)}")
         
     finally:
+        global stop_search_flag
         is_scanning = False
+        stop_search_flag = False  # Reset for next search
 
 def start_cmd(update: Update, context: CallbackContext):
     update.message.reply_text(f"""
@@ -1064,8 +1067,50 @@ def reset_rotation_cmd(update: Update, context: CallbackContext):
     page_rotator.save_state()
     update.message.reply_text("🔄 *تم إعادة تعيين التدوير!*\n\nسيبدأ البحث من الصفحة الأولى مرة أخرى.", parse_mode='Markdown')
 
+
+
+def stop_cmd(update: Update, context: CallbackContext):
+    """يوقف البحث الحالي ويبعت اللي لاقاه"""
+    global stop_search_flag, is_scanning
+
+    if not is_scanning:
+        update.message.reply_text("❌ مفيش بحث شغال دلوقتي!")
+        return
+
+    stop_search_flag = True
+    update.message.reply_text("🛑 *جاري إيقاف البحث...*\n\nهبعتلك اللي لاقيته حد دلوقتي!", parse_mode='Markdown')
+    logger.info("🛑 User requested stop search")
 def unknown(update: Update, context: CallbackContext):
     update.message.reply_text("🤔 *مش فاهم!*\n\nاكتب:\n• *Hi* للبحث عن عروض\n• /start للمساعدة\n• /status للحالة\n• /reset_rotation لإعادة التدوير", parse_mode='Markdown')
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        stats = page_rotator.get_stats()
+        response = json.dumps({
+            "status": "ok",
+            "products": len(sent_products),
+            "timestamp": datetime.now().isoformat(),
+            "categories": 200,
+            "pages": stats['total_pages'],
+            "visited_pages": stats['visited_pages'],
+            "progress": stats['progress_percent'],
+            "rotation_count": stats['rotation_count'],
+            "target_deals": TARGET_DEALS_COUNT,
+            "min_discount": MIN_DISCOUNT,
+            "min_rating": MIN_RATING
+        })
+        self.wfile.write(response.encode())
+    
+    def log_message(self, format, *args):
+        pass
+
+def run_health_server():
+    server = HTTPServer(('0.0.0.0', PORT), HealthHandler)
+    logger.info(f"🌐 Health server running on port {PORT}")
+    server.serve_forever()
 
 def main():
     global updater
@@ -1079,7 +1124,7 @@ def main():
     
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
-
+    
     keep_alive_thread = threading.Thread(target=keep_alive_ping, daemon=True)
     keep_alive_thread.start()
     
@@ -1091,6 +1136,7 @@ def main():
     dp.add_handler(CommandHandler("clear", clear_cmd))
     dp.add_handler(CommandHandler("reset_rotation", reset_rotation_cmd))
     dp.add_handler(MessageHandler(Filters.regex(r'(?i)^hi$'), hi_cmd))
+    dp.add_handler(MessageHandler(Filters.regex(r'(?i)^s$'), stop_cmd))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, unknown))
     
     logger.info("🤖 Bot starting with page rotation...")
