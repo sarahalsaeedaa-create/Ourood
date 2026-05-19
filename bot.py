@@ -199,9 +199,9 @@ def extract_asin(link):
     return None
 
 def create_title_hash(title):
-    clean = re.sub(r'[^ws]', '', title.lower())
-    clean = re.sub(r's+', ' ', clean).strip()
-    clean = re.sub(r'd+', '', clean)
+    clean = re.sub(r'[^\w\s]', '', title.lower())
+    clean = re.sub(r'\s+', ' ', clean).strip()
+    clean = re.sub(r'\d+', '', clean)
     for word in ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'shipped', 'شحن']:
         clean = clean.replace(word, '')
     return hashlib.md5(clean[:30].strip().encode()).hexdigest()[:16]
@@ -226,7 +226,7 @@ def get_product_id(deal):
 def parse_rating(text):
     if not text:
         return 0
-    match = re.search(r'(d+.?d*)', str(text))
+    match = re.search(r'(\d+\.?\d*)', str(text))
     return float(match.group(1)) if match else 0
 
 def create_session():
@@ -415,7 +415,7 @@ def parse_item(item, category, is_best_seller):
         if el:
             try:
                 txt = el.text.replace(',', '').replace('ريال', '').strip()
-                match = re.search(r'[d,]+.?d*', txt)
+                match = re.search(r'[\d,]+\.?\d*', txt)
                 if match:
                     price = float(match.group().replace(',', ''))
                     break
@@ -431,7 +431,7 @@ def parse_item(item, category, is_best_seller):
     old_el = item.find('span', class_='a-text-price')
     if old_el:
         txt = old_el.get_text()
-        match = re.search(r'[d,]+.?d*', txt.replace(',', ''))
+        match = re.search(r'[\d,]+\.?\d*', txt.replace(',', ''))
         if match:
             try:
                 old_price = float(match.group())
@@ -441,9 +441,9 @@ def parse_item(item, category, is_best_seller):
                 pass
 
     if discount == 0:
-        badge = item.find(string=re.compile(r'(d+)%'))
+        badge = item.find(string=re.compile(r'(\d+)%'))
         if badge:
-            match = re.search(r'(d+)', str(badge))
+            match = re.search(r'(\d+)', str(badge))
             if match:
                 try:
                     discount = int(match.group())
@@ -492,7 +492,7 @@ def parse_item(item, category, is_best_seller):
 
     rev_el = item.find('span', class_='a-size-base')
     if rev_el:
-        match = re.search(r'[d,]+', rev_el.text)
+        match = re.search(r'[\d,]+', rev_el.text)
         if match:
             try:
                 reviews = int(match.group().replace(',', ''))
@@ -557,12 +557,9 @@ def search_all_deals(chat_id, status_message_id=None):
                 if processed % 5 == 0 and status_message_id and updater:
                     stats = page_rotator.get_stats()
                     progress = (
-                        f"⏳ جاري البحث... ({processed}/{total_pages} صفحة)
-"
-                        f"📍 {page_info['category']} - صفحة {page_info['page_num']}
-"
-                        f"🔄 دورة: {stats['rotation_count']}
-"
+                        f"⏳ جاري البحث... ({processed}/{total_pages} صفحة)\n"
+                        f"📍 {page_info['category']} - صفحة {page_info['page_num']}\n"
+                        f"🔄 دورة: {stats['rotation_count']}\n"
                         f"✅ تم جمع: {len(all_deals)} صفقة"
                     )
                     try:
@@ -653,14 +650,10 @@ def send_deals_to_telegram(chat_id, deals):
     for deal in deals:
         try:
             text = (
-                f"{deal.get('title')}
-"
-                f"السعر: {deal.get('price')} ريال
-"
-                f"الخصم: {deal.get('discount')}%
-"
-                f"التقييم: {deal.get('rating')}
-"
+                f"{deal.get('title')}\n"
+                f"السعر: {deal.get('price')} ريال\n"
+                f"الخصم: {deal.get('discount')}%\n"
+                f"التقييم: {deal.get('rating')}\n"
                 f"{deal.get('link')}"
             )
             bot.send_message(chat_id=chat_id, text=text)
@@ -697,16 +690,11 @@ def start_command(update: Update, context: CallbackContext):
 def status_command(update: Update, context: CallbackContext):
     stats = page_rotator.get_stats()
     text = (
-        f"Pages: {stats['total_pages']}
-"
-        f"Visited: {stats['visited_pages']}
-"
-        f"Remaining: {stats['remaining_pages']}
-"
-        f"Rotation: {stats['rotation_count']}
-"
-        f"Progress: {stats['progress_percent']:.1f}%
-"
+        f"Pages: {stats['total_pages']}\n"
+        f"Visited: {stats['visited_pages']}\n"
+        f"Remaining: {stats['remaining_pages']}\n"
+        f"Rotation: {stats['rotation_count']}\n"
+        f"Progress: {stats['progress_percent']:.1f}%\n"
         f"Scanning: {is_scanning}"
     )
     update.message.reply_text(text)
