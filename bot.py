@@ -948,7 +948,7 @@ def send_deals(deals, chat_id, status_message_id):
                         disable_web_page_preview=True
                     )
                     sent_products.add(d['id'])
-                    time.sleep(1.5)
+                    time.sleep(5)
                 except:
                     pass
                     pass
