@@ -1,751 +1,591 @@
-#!/usr/bin/env python3
-import os
-import re
-import json
-import logging
-import time
-import random
-import hashlib
-import signal
-import atexit
-from datetime import datetime
-from collections import deque
-from threading import Thread, Event, Lock
-
-import cloudscraper
-from fake_useragent import UserAgent
+import telebot
+import requests
 from bs4 import BeautifulSoup
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, CallbackContext
+import re
+import time
+import json
+import random
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
+TOKEN = "7956075348:AAEYTL28GKeMN7TXyVeGM69iUcfg5ZwOSIk"
+bot = telebot.TeleBot(TOKEN)
 
-TELEGRAM_BOT_TOKEN = os.getenv(
-    "TELEGRAM_BOT_TOKEN",
-    "8769441239:AAEgX3uBbtWc_hHcqs0lmQ50AqKJGOWV6Ok"
-)
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "432826122")
-PORT = int(os.environ.get("PORT", 8080))
+GROQ_API_KEY = "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"
 
-TARGET_DEALS_COUNT = 40
-MIN_DISCOUNT = 50
-MIN_RATING = 3.5
-
-DATABASE_FILE = "bot_database.json"
-ROTATION_FILE = "page_rotation.json"
-
-ua = UserAgent()
-sent_products = set()
-sent_hashes = set()
-is_scanning = False
-updater = None
-stop_event = Event()
-state_lock = Lock()
-
-class PageRotationManager:
-    def __init__(self):
-        self.visited_pages = set()
-        self.page_queue = deque()
-        self.all_pages = []
-        self.rotation_count = 0
-        self.current_batch = []
-
-    def load_state(self):
-        try:
-            if os.path.exists(ROTATION_FILE):
-                with open(ROTATION_FILE, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.visited_pages = set(data.get('visited', []))
-                    self.rotation_count = data.get('rotation_count', 0)
-                    logger.info(f"Loaded rotation state: {len(self.visited_pages)} visited, {self.rotation_count} rotations")
-        except Exception as e:
-            logger.error(f"Error loading rotation state: {e}")
-
-    def save_state(self):
-        try:
-            with open(ROTATION_FILE, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'visited': list(self.visited_pages),
-                    'rotation_count': self.rotation_count,
-                    'last_update': datetime.now().isoformat()
-                }, f, ensure_ascii=False)
-        except Exception as e:
-            logger.error(f"Error saving rotation state: {e}")
-
-    def generate_all_pages(self, categories):
-        self.all_pages = []
-        for base_url, cat_name, cat_type in categories:
-            max_pages = PAGES_CONFIG.get(cat_type, 1)
-            for page_num in range(1, max_pages + 1):
-                page_url = self._build_page_url(base_url, page_num)
-                page_id = f"{cat_name}_page{page_num}"
-                self.all_pages.append({
-                    'id': page_id,
-                    'url': page_url,
-                    'category': cat_name,
-                    'type': cat_type,
-                    'page_num': page_num,
-                    'base_url': base_url
-                })
-        logger.info(f"Generated {len(self.all_pages)} total pages")
-        self._refill_queue()
-        self.save_state()
-        return self.all_pages
-
-    def _build_page_url(self, base_url, page_num):
-        if page_num == 1:
-            return base_url
-        separator = '&' if '?' in base_url else '?'
-        if 'gp/bestsellers' in base_url or 'gp/goldbox' in base_url:
-            return f"{base_url}{separator}pg={page_num}"
-        elif '/s?' in base_url or 'keywords=' in base_url:
-            return f"{base_url}{separator}page={page_num}"
-        else:
-            return f"{base_url}{separator}page={page_num}"
-
-    def _refill_queue(self):
-        unvisited = [p for p in self.all_pages if p['id'] not in self.visited_pages]
-        if not unvisited:
-            unvisited = self.all_pages.copy()
-            self.visited_pages.clear()
-            self.rotation_count += 1
-        random.shuffle(unvisited)
-        self.page_queue = deque(unvisited)
-        logger.info(f"Refilled queue with {len(unvisited)} pages")
-
-    def get_next_batch(self, batch_size=50):
-        if not self.page_queue:
-            self._refill_queue()
-
-        if self.all_pages and len(self.visited_pages) >= len(self.all_pages) * 0.9:
-            logger.info("All pages visited, resetting rotation...")
-            self.visited_pages.clear()
-            self.rotation_count += 1
-            self._refill_queue()
-
-        available_pages = [p for p in self.page_queue if p['id'] not in self.visited_pages]
-        random.shuffle(available_pages)
-        batch = available_pages[:batch_size]
-
-        for page in batch:
-            try:
-                self.page_queue.remove(page)
-            except ValueError:
-                pass
-            self.visited_pages.add(page['id'])
-
-        self.current_batch = batch
-        self.save_state()
-        logger.info(f"Selected batch: {len(batch)} pages (Total visited: {len(self.visited_pages)})")
-        return batch
-
-    def get_stats(self):
-        total_pages = len(self.all_pages)
-        return {
-            'total_pages': total_pages,
-            'visited_pages': len(self.visited_pages),
-            'remaining_pages': total_pages - len(self.visited_pages) if total_pages else 0,
-            'rotation_count': self.rotation_count,
-            'progress_percent': (len(self.visited_pages) / total_pages * 100) if total_pages else 0
-        }
-
-page_rotator = PageRotationManager()
-
-def load_database():
-    global sent_products, sent_hashes
-    try:
-        if os.path.exists(DATABASE_FILE):
-            with open(DATABASE_FILE, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                sent_products = set(data.get('ids', []))
-                sent_hashes = set(data.get('hashes', []))
-                logger.info(f"Loaded DB: {len(sent_products)} ids, {len(sent_hashes)} hashes")
-    except Exception as e:
-        logger.error(f"Error loading DB: {e}")
-
-def save_database():
-    try:
-        with state_lock:
-            with open(DATABASE_FILE, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'ids': list(sent_products),
-                    'hashes': list(sent_hashes)
-                }, f, ensure_ascii=False)
-        logger.info("Saved DB")
-    except Exception as e:
-        logger.error(f"Error saving DB: {e}")
-
-def extract_asin(link):
-    if not link:
-        return None
-    patterns = [
-        r'/dp/([A-Z0-9]{10})',
-        r'/gp/product/([A-Z0-9]{10})',
-        r'product/([A-Z0-9]{10})',
-        r'/gp/aw/d/([A-Z0-9]{10})',
-        r'asins?=([A-Z0-9]{10})',
-        r'asin=([A-Z0-9]{10})'
-    ]
-    for p in patterns:
-        match = re.search(p, link, re.I)
-        if match:
-            asin = match.group(1).upper()
-            if len(asin) == 10:
-                return asin
-    return None
-
-def create_title_hash(title):
-    clean = re.sub(r'[^\w\s]', '', title.lower())
-    clean = re.sub(r'\s+', ' ', clean).strip()
-    clean = re.sub(r'\d+', '', clean)
-    for word in ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'shipped', 'شحن']:
-        clean = clean.replace(word, '')
-    return hashlib.md5(clean[:30].strip().encode()).hexdigest()[:16]
-
-def is_similar_product(title):
-    new_hash = create_title_hash(title)
-    if new_hash in sent_hashes:
-        return True
-    recent = list(sent_hashes)[-200:]
-    for existing_hash in recent:
-        if new_hash[:10] == existing_hash[:10]:
-            return True
-    return False
-
-def get_product_id(deal):
-    asin = extract_asin(deal.get('link', '') or '')
-    if asin:
-        return f"ASIN_{asin}"
-    key = f"{deal.get('title', '')}_{deal.get('price', 0)}"
-    return f"HASH_{hashlib.md5(key.encode()).hexdigest()[:12]}"
-
-def parse_rating(text):
-    if not text:
-        return 0
-    match = re.search(r'(\d+\.?\d*)', str(text))
-    return float(match.group(1)) if match else 0
-
-def create_session():
-    try:
-        ua_str = ua.random
-    except Exception:
-        ua_str = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/113.0 Safari/537.36'
-    session = cloudscraper.create_scraper(
-        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True},
-        delay=5
-    )
-    session.headers.update({
-        'User-Agent': ua_str,
-        'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Referer': 'https://www.amazon.sa/',
-    })
-    return session
-
-def fetch_page(session, url, max_retries=3):
-    backoff = 1.0
-    for _ in range(max_retries):
-        if stop_event.is_set():
-            return None
-        try:
-            time.sleep(random.uniform(1, 2))
-            r = session.get(url, timeout=25)
-            if r.status_code == 200 and r.text:
-                return r.text
-            if r.status_code in (429, 503):
-                logger.warning(f"Rate limited or unavailable ({r.status_code}) on {url}")
-            time.sleep(backoff)
-            backoff *= 2
-        except Exception as e:
-            logger.warning(f"Fetch failed for {url}: {e}")
-            time.sleep(backoff)
-            backoff *= 2
-    return None
-
-PAGES_CONFIG = {
-    'best_sellers': 3,
-    'deals': 2,
-    'warehouse': 2,
-    'coupons': 2,
-    'search': 2,
-    'outlet': 2,
-    'prime': 2,
-    'lightning': 1,
-    'today': 2,
-    'clearance': 3,
+BRAND_NAMES = {
+    "nespresso": "Nespresso", "nescafe": "Nescafé", "nescafé": "Nescafé",
+    "dolce gusto": "Dolce Gusto", "delonghi": "DeLonghi", "philips": "Philips",
+    "bosch": "Bosch", "samsung": "Samsung", "apple": "Apple", "iphone": "iPhone",
+    "ipad": "iPad", "macbook": "MacBook", "airpods": "AirPods", "sony": "Sony",
+    "lg": "LG", "dyson": "Dyson", "braun": "Braun", "panasonic": "Panasonic",
+    "canon": "Canon", "nikon": "Nikon", "xiaomi": "Xiaomi", "huawei": "Huawei",
+    "oppo": "OPPO", "realme": "Realme", "oneplus": "OnePlus", "nokia": "Nokia",
+    "lenovo": "Lenovo", "dell": "Dell", "hp": "HP", "asus": "ASUS", "acer": "Acer",
+    "msi": "MSI", "logitech": "Logitech", "razer": "Razer", "hyperx": "HyperX",
+    "jbl": "JBL", "bose": "Bose", "beats": "Beats", "sennheiser": "Sennheiser",
+    "anker": "Anker", "baseus": "Baseus", "ugreen": "UGREEN", "amazon": "Amazon",
+    "google": "Google", "microsoft": "Microsoft", "adidas": "Adidas", "nike": "Nike",
+    "puma": "Puma", "reebok": "Reebok", "under armour": "Under Armour",
+    "new balance": "New Balance", "asics": "ASICS", "timberland": "Timberland",
+    "skechers": "Skechers", "crocs": "Crocs", "levis": "Levi's", "wrangler": "Wrangler",
+    "tommy hilfiger": "Tommy Hilfiger", "calvin klein": "Calvin Klein", "lacoste": "Lacoste",
+    "polo": "Polo", "gucci": "Gucci", "prada": "Prada", "versace": "Versace",
+    "dior": "Dior", "chanel": "Chanel", "louis vuitton": "Louis Vuitton",
+    "hermes": "Hermès", "burberry": "Burberry", "coach": "Coach",
+    "michael kors": "Michael Kors", "fossil": "Fossil", "casio": "Casio",
+    "swatch": "Swatch", "rolex": "Rolex", "omega": "Omega", "tissot": "Tissot",
+    "seiko": "Seiko", "citizen": "Citizen", "orient": "Orient", "dove": "Dove",
+    "nivea": "Nivea", "loreal": "L'Oréal", "pantene": "Pantene",
+    "head & shoulders": "Head & Shoulders", "gillette": "Gillette",
+    "oral-b": "Oral-B", "colgate": "Colgate", "signal": "Signal",
+    "ariel": "Ariel", "tide": "Tide", "persil": "Persil", "downy": "Downy",
+    "comfort": "Comfort", "finish": "Finish", "fa": "FA", "rexona": "Rexona",
+    "axe": "AXE", "old spice": "Old Spice", "dettol": "Dettol",
+    "lifebuoy": "Lifebuoy", "purell": "Purell", "kleenex": "Kleenex",
+    "tork": "Tork", "tempo": "Tempo", "whisper": "Whisper", "always": "Always",
+    "tampax": "Tampax", "johnson": "Johnson's", "johnsons": "Johnson's",
+    "pampers": "Pampers", "huggies": "Huggies", "molfix": "Molfix",
+    "fine": "Fine", "marlboro": "Marlboro", "lm": "L&M", "kent": "Kent",
+    "davidoff": "Davidoff", "nesquik": "Nesquik", "kitkat": "KitKat",
+    "snickers": "Snickers", "mars": "Mars", "twix": "Twix", "bounty": "Bounty",
+    "milky way": "Milky Way", "galaxy": "Galaxy", "cadbury": "Cadbury",
+    "lindt": "Lindt", "ferrero": "Ferrero", "nutella": "Nutella",
+    "kinder": "Kinder", "oreo": "Oreo", "belvita": "Belvita", "lu": "LU",
+    "tuc": "TUC", "pringles": "Pringles", "lays": "Lay's", "doritos": "Doritos",
+    "cheetos": "Cheetos", "pepsi": "Pepsi", "coca cola": "Coca-Cola",
+    "cocacola": "Coca-Cola", "sprite": "Sprite", "fanta": "Fanta",
+    "7up": "7UP", "mirinda": "Mirinda", "mountain dew": "Mountain Dew",
+    "red bull": "Red Bull", "monster": "Monster", "power horse": "Power Horse",
+    "nescafe dolce gusto": "Nescafé Dolce Gusto", "dolcegusto": "Dolce Gusto",
+    "vichy": "Vichy", "dercos": "Dercos", "l'oreal": "L'Oréal",
+    "l'oréal": "L'Oréal", "loreal paris": "L'Oréal Paris",
+    "tresemme": "TRESemmé", "guess": "Guess", "night guess": "Night Guess",
+    "swiss arabian": "Swiss Arabian", "kashkha": "Kashkha",
+    "ultra doux": "Ultra Doux", "honey treasures": "Honey Treasures",
+    "magic retouch": "Magic Retouch", "keratin smooth": "Keratin Smooth",
+    "energy": "Energy",
 }
 
-CATEGORIES_DEF = [
-    ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/watches", "⌚ Watches Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/shoes", "👟 Shoes Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/kitchen", "🍳 Kitchen Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/home", "🏠 Home Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/computers", "💻 Computers Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/mobile", "📱 Mobile Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/perfumes", "🌸 Perfumes Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/toys", "🎮 Toys Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/sports", "⚽ Sports Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/baby", "👶 Baby Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/grocery", "🛒 Grocery Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/automotive", "🚗 Automotive Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/tools", "🔧 Tools Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/books", "📚 Books Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/jewelry", "💎 Jewelry Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/luggage", "🧳 Luggage Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/pet", "🐾 Pet Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/office", "📎 Office Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/personal-care", "🧴 Personal Care Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/health", "💊 Health Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/video-games", "🎮 Games Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/camera", "📷 Camera Best Seller", 'best_sellers'),
 
-    ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox", 'deals'),
-    ("https://www.amazon.sa/deals/electronics", "📱 Electronics Deals", 'deals'),
-    ("https://www.amazon.sa/deals/fashion", "👕 Fashion Deals", 'deals'),
-    ("https://www.amazon.sa/deals/beauty", "💄 Beauty Deals", 'deals'),
-    ("https://www.amazon.sa/deals/home", "🏠 Home Deals", 'deals'),
-    ("https://www.amazon.sa/deals/kitchen", "🍳 Kitchen Deals", 'deals'),
-    ("https://www.amazon.sa/deals/watches", "⌚ Watches Deals", 'deals'),
-    ("https://www.amazon.sa/deals/perfumes", "🌸 Perfumes Deals", 'deals'),
-    ("https://www.amazon.sa/deals/toys", "🎮 Toys Deals", 'deals'),
-    ("https://www.amazon.sa/deals/sports", "⚽ Sports Deals", 'deals'),
-    ("https://www.amazon.sa/deals/baby", "👶 Baby Deals", 'deals'),
-    ("https://www.amazon.sa/deals/grocery", "🛒 Grocery Deals", 'deals'),
-    ("https://www.amazon.sa/deals/automotive", "🚗 Automotive Deals", 'deals'),
-    ("https://www.amazon.sa/deals/tools", "🔧 Tools Deals", 'deals'),
-    ("https://www.amazon.sa/deals/office", "📎 Office Deals", 'deals'),
-    ("https://www.amazon.sa/deals/books", "📚 Books Deals", 'deals'),
+def protect_brands(text):
+    for brand_key, brand_original in sorted(BRAND_NAMES.items(), key=lambda x: -len(x[0])):
+        pattern = re.compile(re.escape(brand_key), re.IGNORECASE)
+        text = pattern.sub(brand_original, text)
+    return text
 
-    ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse Deals", 'warehouse'),
-    ("https://www.amazon.sa/gp/warehouse-deals/electronics", "🏭 Warehouse Electronics", 'warehouse'),
-    ("https://www.amazon.sa/gp/warehouse-deals/fashion", "🏭 Warehouse Fashion", 'warehouse'),
-    ("https://www.amazon.sa/gp/warehouse-deals/home", "🏭 Warehouse Home", 'warehouse'),
-    ("https://www.amazon.sa/gp/warehouse-deals/kitchen", "🏭 Warehouse Kitchen", 'warehouse'),
-    ("https://www.amazon.sa/gp/warehouse-deals/beauty", "🏭 Warehouse Beauty", 'warehouse'),
-    ("https://www.amazon.sa/gp/warehouse-deals/sports", "🏭 Warehouse Sports", 'warehouse'),
-    ("https://www.amazon.sa/gp/warehouse-deals/tools", "🏭 Warehouse Tools", 'warehouse'),
 
-    ("https://www.amazon.sa/gp/coupons", "🎟️ Coupons", 'coupons'),
-    ("https://www.amazon.sa/gp/coupons/electronics", "🎟️ Electronics Coupons", 'coupons'),
-    ("https://www.amazon.sa/gp/coupons/fashion", "🎟️ Fashion Coupons", 'coupons'),
-    ("https://www.amazon.sa/gp/coupons/home", "🎟️ Home Coupons", 'coupons'),
-    ("https://www.amazon.sa/gp/coupons/beauty", "🎟️ Beauty Coupons", 'coupons'),
-    ("https://www.amazon.sa/gp/coupons/grocery", "🎟️ Grocery Coupons", 'coupons'),
-    ("https://www.amazon.sa/gp/coupons/baby", "🎟️ Baby Coupons", 'coupons'),
+CATEGORY_KEYWORDS = {
+    "electronics": ["phone", "iphone", "samsung", "laptop", "computer", "tablet", "ipad", "airpods", "headphones", "camera", "tv", "screen", "monitor", "keyboard", "mouse", "charger", "cable", "power bank", "battery", "smart watch", "watch", "speaker", "router", "modem", "electronic", "digital", "هاتف", "آيفون", "لابتوب", "كمبيوتر", "تابلت", "سماعات", "شاحن", "كيبل", "بطارية", "شاشة", "كاميرا", "تلفزيون", "راوتر", "ساعة ذكية", "إلكتروني"],
+    "fashion": ["shirt", "t-shirt", "pants", "jeans", "jacket", "hoodie", "dress", "skirt", "socks", "shoes", "sneakers", "boots", "sandals", "slippers", "cap", "hat", "bag", "backpack", "wallet", "belt", "tie", "scarf", "gloves", "clothing", "apparel", "wear", "fashion", "قميص", "تيشيرت", "بنطلون", "جاكيت", "فستان", "تنورة", "حذاء", "شنطة", "حقيبة", "محفظة", "حزام", "كاب", "ملابس", "أزياء"],
+    "beauty": ["perfume", "fragrance", "oud", "musk", "cream", "lotion", "shampoo", "conditioner", "soap", "makeup", "lipstick", "foundation", "mascara", "eyeliner", "brush", "cosmetic", "skincare", "haircare", "عطر", "عود", "مسك", "كريم", "شامبو", "بلسم", "صابون", "مكياج", "أحمر شفاه", "عناية", "جمال", "تجميل"],
+    "home": ["refrigerator", "fridge", "washing machine", "vacuum cleaner", "air conditioner", "ac", "heater", "fan", "blender", "mixer", "oven", "microwave", "toaster", "kettle", "coffee maker", "iron", "hair dryer", "chair", "table", "desk", "bed", "sofa", "couch", "lamp", "light", "mirror", "carpet", "curtain", "furniture", "kitchen", "home", "house", "ثلاجة", "غسالة", "مكنسة", "مكيف", "دفاية", "مروحة", "خلاط", "فرن", "مايكرويف", "غلاية", "كرسي", "طاولة", "سرير", "كنبة", "لمبة", "سجادة", "أثاث", "مطبخ", "منزل"],
+    "sports": ["treadmill", "dumbbell", "yoga mat", "bicycle", "ball", "gym", "fitness", "exercise", "workout", "sport", "running", "walking", "training", "sneakers", "shoes", "رياضة", "جيم", "لياقة", "تمارين", "سير", "دامبل", "يوغا", "دراجة", "كرة", "جري", "مشي", "تدريب"]
+}
 
-    ("https://www.amazon.sa/gp/prime/pipeline/prime_exclusives", "👑 Prime Exclusives", 'prime'),
-    ("https://www.amazon.sa/gp/prime/pipeline/lightning_deals", "⚡ Lightning Deals", 'lightning'),
 
-    ("https://www.amazon.sa/gp/todays-deals", "📅 Today Deals", 'today'),
-    ("https://www.amazon.sa/gp/todays-deals/electronics", "📅 Today Electronics", 'today'),
-    ("https://www.amazon.sa/gp/todays-deals/fashion", "📅 Today Fashion", 'today'),
-    ("https://www.amazon.sa/gp/todays-deals/home", "📅 Today Home", 'today'),
-    ("https://www.amazon.sa/gp/todays-deals/beauty", "📅 Today Beauty", 'today'),
+def detect_product_category(product_name):
+    name_lower = product_name.lower()
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in name_lower:
+                return category
+    return "general"
 
-    ("https://www.amazon.sa/outlet", "🎁 Outlet", 'outlet'),
-    ("https://www.amazon.sa/outlet/electronics", "🎁 Outlet Electronics", 'outlet'),
-    ("https://www.amazon.sa/outlet/home", "🎁 Outlet Home", 'outlet'),
-    ("https://www.amazon.sa/outlet/fashion", "🎁 Outlet Fashion", 'outlet'),
-    ("https://www.amazon.sa/outlet/beauty", "🎁 Outlet Beauty", 'outlet'),
 
-    ("https://www.amazon.sa/s?k=clearance&rh=p_8%3A50-99", "🔥 Clearance", 'clearance'),
-    ("https://www.amazon.sa/s?k=last+chance&rh=p_8%3A50-99", "🔥 Last Chance", 'clearance'),
-    ("https://www.amazon.sa/s?k=final+sale&rh=p_8%3A50-99", "🔥 Final Sale", 'clearance'),
-    ("https://www.amazon.sa/s?k=limited+time&rh=p_8%3A50-99", "⏰ Limited Time", 'clearance'),
-    ("https://www.amazon.sa/s?k=flash+sale&rh=p_8%3A50-99", "⚡ Flash Sale", 'clearance'),
-    ("https://www.amazon.sa/s?k=super+sale&rh=p_8%3A50-99", "💥 Super Sale", 'clearance'),
-    ("https://www.amazon.sa/s?k=mega+deal&rh=p_8%3A50-99", "🎯 Mega Deal", 'clearance'),
-    ("https://www.amazon.sa/s?k=big+sale&rh=p_8%3A50-99", "🎪 Big Sale", 'clearance'),
+def detect_product_gender(product_name):
+    name_lower = product_name.lower()
+    women_indicators = ['women', 'woman', 'ladies', 'lady', 'female', 'feminine', 'نسائي', 'نساء', 'نسا', 'سيدات', 'سيدة', 'انثى', 'انثوي', 'dress', 'skirt', 'فستان', 'تنورة', 'بلايز', 'فساتين', 'makeup', 'lipstick', 'شامبو', 'بلسم', 'كريم', 'عطر نسائي', 'عطر للنساء']
+    men_indicators = ['men', 'man', 'male', 'masculine', 'gents', 'gentlemen', 'رجالي', 'رجال', 'رجل', 'ذكر', 'ذكوري', 'رجولة', 'عطر رجالي', 'عطر للرجال']
+    for indicator in women_indicators:
+        if indicator in name_lower:
+            return 'women'
+    for indicator in men_indicators:
+        if indicator in name_lower:
+            return 'men'
+    return 'neutral'
 
-    ("https://www.amazon.sa/s?k=iphone&rh=p_8%3A30-99", "🍎 iPhone", 'search'),
-    ("https://www.amazon.sa/s?k=ipad&rh=p_8%3A30-99", "🍎 iPad", 'search'),
-    ("https://www.amazon.sa/s?k=macbook&rh=p_8%3A30-99", "🍎 MacBook", 'search'),
-    ("https://www.amazon.sa/s?k=airpods&rh=p_8%3A30-99", "🍎 AirPods", 'search'),
-    ("https://www.amazon.sa/s?k=apple+watch&rh=p_8%3A30-99", "🍎 Apple Watch", 'search'),
-    ("https://www.amazon.sa/s?k=apple+tv&rh=p_8%3A30-99", "🍎 Apple TV", 'search'),
-    ("https://www.amazon.sa/s?k=airtag&rh=p_8%3A30-99", "🍎 AirTag", 'search'),
-    ("https://www.amazon.sa/s?k=homepod&rh=p_8%3A30-99", "🍎 HomePod", 'search'),
 
-    ("https://www.amazon.sa/s?k=samsung+galaxy&rh=p_8%3A30-99", "📱 Galaxy Phone", 'search'),
-    ("https://www.amazon.sa/s?k=samsung+tablet&rh=p_8%3A30-99", "📱 Galaxy Tab", 'search'),
-    ("https://www.amazon.sa/s?k=samsung+watch&rh=p_8%3A30-99", "📱 Galaxy Watch", 'search'),
-    ("https://www.amazon.sa/s?k=samsung+buds&rh=p_8%3A30-99", "📱 Galaxy Buds", 'search'),
-    ("https://www.amazon.sa/s?k=samsung+tv&rh=p_8%3A30-99", "📱 Samsung TV", 'search'),
-    ("https://www.amazon.sa/s?k=samsung+monitor&rh=p_8%3A30-99", "📱 Samsung Monitor", 'search'),
+TRANSLATION_DICT = {
+    "laptop": "لابتوب", "tablet": "تابلت", "keyboard": "كيبورد", "mouse": "ماوس",
+    "charger": "شاحن", "cable": "كيبل", "power bank": "باور بانك", "battery": "بطارية",
+    "screen": "شاشة", "monitor": "شاشة عرض", "camera": "كاميرا", "speaker": "سماعة",
+    "watch": "ساعة", "smartwatch": "ساعة ذكية", "headphones": "سماعات رأس",
+    "router": "راوتر", "modem": "مودم", "tv": "تلفزيون", "television": "تلفزيون",
+    "shoes": "حذاء", "shoe": "حذاء", "sneakers": "حذاء رياضي", "boots": "بوت",
+    "sandals": "صندل", "slippers": "شبشب", "t-shirt": "تيشيرت", "shirt": "قميص",
+    "pants": "بنطلون", "jeans": "جينز", "jacket": "جاكيت", "hoodie": "هودي",
+    "dress": "فستان", "skirt": "تنورة", "socks": "شرابات", "cap": "كاب",
+    "hat": "قبعة", "bag": "شنطة", "backpack": "حقيبة ظهر", "wallet": "محفظة",
+    "belt": "حزام", "scarf": "وشاح", "gloves": "قفازات",
+    "perfume": "عطر", "fragrance": "عطر", "oud": "عود", "musk": "مسك",
+    "cream": "كريم", "lotion": "لوشن", "shampoo": "شامبو", "conditioner": "بلسم", "soap": "صابون",
+    "refrigerator": "ثلاجة", "fridge": "ثلاجة", "washing machine": "غسالة",
+    "vacuum cleaner": "مكنسة كهربائية", "air conditioner": "مكيف", "ac": "مكيف",
+    "heater": "دفاية", "fan": "مروحة", "blender": "خلاط", "mixer": "عجانة",
+    "oven": "فرن", "microwave": "مايكرويف", "toaster": "محمصة", "kettle": "غلاية",
+    "coffee maker": "ماكينة قهوة", "iron": "مكواة", "hair dryer": "سشوار",
+    "chair": "كرسي", "table": "طاولة", "desk": "مكتب", "bed": "سرير",
+    "sofa": "كنبة", "couch": "كنبة", "lamp": "لمبة", "light": "إضاءة",
+    "mirror": "مرآة", "carpet": "سجادة", "curtain": "ستارة",
+    "treadmill": "سير كهربائي", "dumbbell": "دامبل", "yoga mat": "حصيرة يوغا",
+    "bicycle": "دراجة", "ball": "كرة", "toys": "ألعاب", "toy": "لعبة",
+    "baby": "أطفال", "kids": "أطفال",
+    "wireless": "لاسلكي", "bluetooth": "بلوتوث", "smart": "ذكي", "digital": "رقمي",
+    "electric": "كهربائي", "automatic": "أوتوماتيك", "portable": "محمول",
+    "professional": "احترافي", "original": "أصلي", "new": "جديد",
+    "pro": "برو", "max": "ماكس", "plus": "بلس", "ultra": "ألترا", "mini": "ميني",
+    "premium": "بريميوم", "deluxe": "ديلوكس", "unisex": "للجنسين", "adult": "للبالغين",
+    "men": "رجالي", "women": "نسائي",
+    "black": "أسود", "white": "أبيض", "blue": "أزرق", "red": "أحمر", "green": "أخضر",
+    "capsule": "كبسولة", "capsules": "كبسولات", "machine": "ماكينة", "maker": "صانع",
+    "espresso": "إسبريسو", "coffee": "قهوة", "cafe": "كافيه",
+    "preparation": "تحضير", "prepare": "تحضير",
+    "anti": "مضاد", "anti-hair loss": "مضاد تساقط", "hair loss": "تساقط الشعر",
+    "stimulating": "منشط", "stimulator": "منشط", "fortifying": "يقوي",
+    "serum": "سيروم", "repair": "ترميم", "damaged": "تالف", "split ends": "نهايات متقصفة",
+    "protection": "حماية", "heat": "حرارة", "spray": "بخاخ", "fixative": "مثبت",
+    "keratin": "كيراتين", "smooth": "سموث", "touch": "ريتاتش", "retouch": "ريتاتش",
+    "night": "نايت", "eau de toilette": "أو دي تواليت", "edt": "أو دي تواليت",
+    "eau de parfum": "أو دي بارفان", "edp": "أو دي بارفان", "perfume": "عطر",
+    "for men": "للرجال", "for women": "للنساء", "unisex": "للجنسين",
+    "swiss": "سويسرية", "arabian": "عربية", "oriental": "شرقية",
+    "honey": "هوني", "treasures": "تريجرز",
+}
 
-    ("https://www.amazon.sa/s?k=sony+headphones&rh=p_8%3A30-99", "🎧 Sony Headphones", 'search'),
-    ("https://www.amazon.sa/s?k=bose+headphones&rh=p_8%3A30-99", "🎧 Bose Headphones", 'search'),
-    ("https://www.amazon.sa/s?k=beats+headphones&rh=p_8%3A30-99", "🎧 Beats Headphones", 'search'),
-    ("https://www.amazon.sa/s?k=jbl+speaker&rh=p_8%3A30-99", "🎧 JBL Speaker", 'search'),
-    ("https://www.amazon.sa/s?k=harman+kardon&rh=p_8%3A30-99", "🎧 Harman Kardon", 'search'),
-    ("https://www.amazon.sa/s?k=marshall&rh=p_8%3A30-99", "🎧 Marshall", 'search'),
-    ("https://www.amazon.sa/s?k=skullcandy&rh=p_8%3A30-99", "🎧 Skullcandy", 'search'),
-    ("https://www.amazon.sa/s?k=sennheiser&rh=p_8%3A30-99", "🎧 Sennheiser", 'search'),
 
-    ("https://www.amazon.sa/s?k=lenovo+laptop&rh=p_8%3A30-99", "💻 Lenovo Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=hp+laptop&rh=p_8%3A30-99", "💻 HP Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=dell+laptop&rh=p_8%3A30-99", "💻 Dell Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=asus+laptop&rh=p_8%3A30-99", "💻 Asus Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=acer+laptop&rh=p_8%3A30-99", "💻 Acer Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=msi+laptop&rh=p_8%3A30-99", "💻 MSI Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=razer+laptop&rh=p_8%3A30-99", "💻 Razer Laptop", 'search'),
-    ("https://www.amazon.sa/s?k=alienware&rh=p_8%3A30-99", "💻 Alienware", 'search'),
-
-    ("https://www.amazon.sa/s?k=playstation+5&rh=p_8%3A30-99", "🎮 PS5", 'search'),
-    ("https://www.amazon.sa/s?k=playstation+4&rh=p_8%3A30-99", "🎮 PS4", 'search'),
-    ("https://www.amazon.sa/s?k=xbox+series&rh=p_8%3A30-99", "🎮 Xbox Series", 'search'),
-    ("https://www.amazon.sa/s?k=nintendo+switch&rh=p_8%3A30-99", "🎮 Nintendo Switch", 'search'),
-    ("https://www.amazon.sa/s?k=gaming+mouse&rh=p_8%3A30-99", "🎮 Gaming Mouse", 'search'),
-    ("https://www.amazon.sa/s?k=gaming+keyboard&rh=p_8%3A30-99", "🎮 Gaming Keyboard", 'search'),
-    ("https://www.amazon.sa/s?k=gaming+headset&rh=p_8%3A30-99", "🎮 Gaming Headset", 'search'),
-    ("https://www.amazon.sa/s?k=gaming+chair&rh=p_8%3A30-99", "🎮 Gaming Chair", 'search'),
-    ("https://www.amazon.sa/s?k=rtx+graphics&rh=p_8%3A30-99", "🎮 RTX Graphics", 'search'),
-]
-
-def parse_item(item, category, is_best_seller):
-    price = None
-    for sel in ['.a-price-whole', '.a-price .a-offscreen', '.a-price-range', '.a-price']:
-        el = item.select_one(sel)
-        if el:
-            try:
-                txt = el.text.replace(',', '').replace('ريال', '').strip()
-                match = re.search(r'[\d,]+\.?\d*', txt)
-                if match:
-                    price = float(match.group().replace(',', ''))
-                    break
-            except Exception:
-                pass
-
-    if not price or price <= 0:
-        return None
-
-    old_price = 0
-    discount = 0
-
-    old_el = item.find('span', class_='a-text-price')
-    if old_el:
-        txt = old_el.get_text()
-        match = re.search(r'[\d,]+\.?\d*', txt.replace(',', ''))
-        if match:
-            try:
-                old_price = float(match.group())
-                if old_price > price:
-                    discount = int(((old_price - price) / old_price) * 100)
-            except Exception:
-                pass
-
-    if discount == 0:
-        badge = item.find(string=re.compile(r'(\d+)%'))
-        if badge:
-            match = re.search(r'(\d+)', str(badge))
-            if match:
-                try:
-                    discount = int(match.group())
-                    old_price = price / (1 - discount / 100)
-                except Exception:
-                    pass
-
-    title = None
-    for sel in ['h2 a span', 'h2 span', '.a-size-mini span', '.a-size-base-plus', '.p13n-sc-truncated', '.a-size-medium']:
-        el = item.select_one(sel)
-        if el and el.text.strip():
-            title = el.text.strip()
-            if len(title) > 5:
-                break
-
-    if not title:
-        return None
-
-    link = ""
-    a = item.find('a', href=True)
-    if a:
-        href = a['href']
-        if href.startswith('/'):
-            link = f"https://www.amazon.sa{href}"
-        elif 'amazon.sa' in href:
-            link = href
+def translate_to_arabic(text):
+    text = protect_brands(text)
+    text_lower = text.lower()
+    words = text_lower.split()
+    translated_words = []
+    for word in words:
+        clean_word = re.sub(r'[^\w\s]', '', word)
+        if clean_word in TRANSLATION_DICT:
+            translated_words.append(TRANSLATION_DICT[clean_word])
         else:
-            asin = extract_asin(href)
-            if asin:
-                link = f"https://www.amazon.sa/dp/{asin}"
+            translated_words.append(word)
+    result = " ".join(translated_words)
+    result = re.sub(r'\b(\w+)\s+\1\b', r'\1', result)
+    return result
 
-    img = ""
-    for sel in ['img.s-image', 'img[src]', '.s-image']:
-        el = item.select_one(sel)
-        if el:
-            img = el.get('src', '') or el.get('data-src', '') or el.get('data-lazy-src', '')
-            if img.startswith('http'):
+
+def smart_arabic_title(full_title):
+    full_title = protect_brands(full_title)
+    arabic_title = translate_to_arabic(full_title)
+    words = arabic_title.split()
+    unique_words = []
+    for word in words:
+        if not unique_words or word.lower() != unique_words[-1].lower():
+            unique_words.append(word)
+    result = " ".join(unique_words)
+    result = protect_brands(result)
+    if len(result) > 80:
+        for sep in ['،', ',', '-', '|', '/']:
+            if sep in result[:80]:
+                idx = result.rfind(sep, 40, 80)
+                if idx > 0:
+                    result = result[:idx]
+                    break
+        else:
+            idx = result.rfind(' ', 60, 80)
+            if idx > 0:
+                result = result[:idx]
+            else:
+                result = result[:80]
+    return result.strip()
+
+
+def get_category_emoji(category):
+    emojis = {"electronics": "📱", "fashion": "👕", "beauty": "💄", "home": "🏠", "sports": "💪"}
+    return emojis.get(category, "📦")
+
+
+def expand_url(url):
+    try:
+        if any(short in url.lower() for short in ['amzn.to', 'bit.ly', 'tinyurl', 't.co', 'ty.gl']):
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get(url, headers=headers, allow_redirects=True, timeout=20)
+            return r.url
+        return url
+    except:
+        return url
+
+
+def is_saudi_amazon(url):
+    return "amazon.sa" in url.lower()
+
+
+def extract_asin(url):
+    patterns = [
+        r'/dp/([A-Z0-9]{10})', r'/gp/product/([A-Z0-9]{10})',
+        r'/product/([A-Z0-9]{10})', r'([A-Z0-9]{10})/?$',
+        r'([A-Z0-9]{10})(?:[/?]|\b)'
+    ]
+    for p in patterns:
+        m = re.search(p, url)
+        if m:
+            return m.group(1)
+    return None
+
+
+def clean_price(price_text):
+    try:
+        nums = re.findall(r'[\d,]+(?:.\d+)?', price_text)
+        if nums:
+            num_str = nums[0].replace(",", "")
+            num_float = float(num_str)
+            num_int = int(num_float)
+            return f"{num_int} ريال"
+    except:
+        pass
+    return price_text
+
+
+def extract_number(price_text):
+    try:
+        nums = re.findall(r'[\d,]+(?:.\d+)?', price_text)
+        if nums:
+            return float(nums[0].replace(",", ""))
+    except:
+        pass
+    return 0
+
+
+def get_seller_info(soup):
+    seller_name = None
+    seller_rating = None
+    seller_selectors = [
+        "#merchant-info a",
+        "[data-feature-name='merchant'] a",
+        ".tabular-buybox-text[tabular-attribute-name='Merchant']",
+        "#merchant-info",
+    ]
+    for selector in seller_selectors:
+        elem = soup.select_one(selector)
+        if elem:
+            text = elem.get_text(strip=True)
+            if text and "Amazon" not in text and len(text) > 2:
+                seller_name = text
                 break
-
-    rating = 0
-    reviews = 0
-
-    rate_el = item.find('span', class_='a-icon-alt')
-    if rate_el:
-        rating = parse_rating(rate_el.text)
-
-    rev_el = item.find('span', class_='a-size-base')
-    if rev_el:
-        match = re.search(r'[\d,]+', rev_el.text)
+    rating_elem = soup.select_one("[data-feature-name='merchant'] .a-icon-alt")
+    if rating_elem:
+        text = rating_elem.get_text(strip=True)
+        match = re.search(r'(\d+)%', text)
         if match:
-            try:
-                reviews = int(match.group().replace(',', ''))
-            except Exception:
-                pass
+            seller_rating = int(match.group(1))
+    return seller_name, seller_rating
 
-    deal = {
-        'title': title,
-        'price': price,
-        'old_price': round(old_price, 2),
-        'discount': discount,
-        'rating': rating,
-        'reviews': reviews,
-        'link': link,
-        'image': img,
-        'category': category,
-        'is_best_seller': is_best_seller,
-    }
-    deal['id'] = get_product_id(deal)
-    return deal
 
-def is_valid_deal(deal):
-    if deal['discount'] < MIN_DISCOUNT:
-        return False
-    if deal['rating'] < MIN_RATING:
-        return False
-    if deal['price'] <= 0 or deal['price'] > 10000:
-        return False
-    return True
+def extract_coupon_info(text):
+    if not text:
+        return None, 0
+    percent = 0
+    percent_match = re.search(r'(\d+)%', text)
+    if percent_match:
+        percent = int(percent_match.group(1))
+    code = None
+    code_match = re.search(r'\b([A-Z]{3,}\d{2,}|\d{2,}[A-Z]{3,}|[A-Z]{4,})\b', text)
+    if code_match:
+        candidate = code_match.group(1)
+        if len(candidate) >= 4 and len(candidate) <= 15 and re.search(r'[A-Z]', candidate):
+            code = candidate
+    if not code and percent > 0:
+        code = f"خصم {percent}%"
+    return code, percent
 
-def search_all_deals(chat_id, status_message_id=None):
-    all_deals = []
-    session = create_session()
 
-    if not page_rotator.all_pages:
-        page_rotator.generate_all_pages(CATEGORIES_DEF)
-        page_rotator.load_state()
+def get_all_coupons(soup, current_price_num):
+    found_coupons = []
+    selectors = [
+        "#couponTextInput", "[data-feature-name='coupon']", ".couponText",
+        "#couponContainer", "[id*='coupon']", ".promoPriceBlockMessage",
+        "[data-a-expander-name='couponSecondaryView']", ".couponCheckbox",
+        ".savingsPercentage", ".a-color-price",
+    ]
+    for selector in selectors:
+        elems = soup.select(selector)
+        for elem in elems:
+            text = elem.get_text(strip=True)
+            if text and len(text) > 3:
+                code, percent = extract_coupon_info(text)
+                if code and percent > 0:
+                    final_price = int(current_price_num - (current_price_num * percent / 100))
+                    found_coupons.append({
+                        "code": code, "percent": percent, "final_price": final_price, "text": text
+                    })
+    page_text = soup.get_text()
+    explicit_patterns = [
+        r'(?:apply|clip|use|enter|استخدم|طبّق)\s+([A-Z0-9]{4,12})\s*(?:to save|للحصول|for)\s*(\d+)%',
+        r'([A-Z]{3,}\d{2,})\s*[-–]\s*save\s*(\d+)%',
+        r'([A-Z]{3,}\d{2,})\s*[-–]\s*(\d+)%\s*off',
+        r'(?:promo\s*code|كود\s*الخصم|كوبون)[\s:]+([A-Z0-9]{4,12})',
+    ]
+    for pattern in explicit_patterns:
+        matches = re.findall(pattern, page_text, re.IGNORECASE)
+        for match in matches:
+            if isinstance(match, tuple):
+                code, percent = match[0], int(match[1]) if str(match[1]).isdigit() else 0
+            else:
+                code, percent = match, 0
+            if code and len(code) >= 4 and percent > 0:
+                final_price = int(current_price_num - (current_price_num * percent / 100))
+                found_coupons.append({
+                    "code": code.upper(), "percent": percent, "final_price": final_price,
+                    "text": f"{code} خصم {percent}%"
+                })
+    seen = {}
+    unique = []
+    for c in found_coupons:
+        key = c["code"].upper()
+        if key not in seen:
+            seen[key] = True
+            unique.append(c)
+    unique.sort(key=lambda x: x["percent"], reverse=True)
+    return unique
 
-    batch_size = 50
-    max_attempts = 10
 
-    for attempt in range(max_attempts):
-        if stop_event.is_set():
-            break
-        if len(all_deals) >= TARGET_DEALS_COUNT * 3:
-            break
-
-        pages_to_search = page_rotator.get_next_batch(batch_size)
-        if not pages_to_search:
-            break
-
-        total_pages = len(pages_to_search)
-        processed = 0
-
-        for page_info in pages_to_search:
-            if stop_event.is_set():
-                break
-
-            try:
-                processed += 1
-
-                if processed % 5 == 0 and status_message_id and updater:
-                    stats = page_rotator.get_stats()
-                    progress = (
-                        f"⏳ جاري البحث... ({processed}/{total_pages} صفحة)\n"
-                        f"📍 {page_info['category']} - صفحة {page_info['page_num']}\n"
-                        f"🔄 دورة: {stats['rotation_count']}\n"
-                        f"✅ تم جمع: {len(all_deals)} صفقة"
-                    )
-                    try:
-                        updater.bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=status_message_id,
-                            text=progress
-                        )
-                    except Exception:
-                        pass
-
-                logger.info(f"Searching [{page_info['category']}] Page {page_info['page_num']}")
-                html = fetch_page(session, page_info['url'])
-                if not html:
-                    continue
-
-                soup = BeautifulSoup(html, 'html.parser')
-                items = []
-
-                if 'best_sellers' in page_info['type']:
-                    items.extend(soup.find_all('li', class_='zg-item-immersion'))
-                    items.extend(soup.find_all('div', class_='p13n-sc-uncoverable-faceout'))
-
-                items.extend(soup.find_all('div', {'data-component-type': 's-search-result'}))
-                items.extend(soup.find_all('div', {'data-testid': 'deal-card'}))
-                items.extend(soup.find_all('div', class_='s-result-item'))
-                items.extend(soup.find_all('div', class_='a-section'))
-
-                logger.info(f"Found {len(items)} items")
-
-                for item in items:
-                    if stop_event.is_set():
+def get_product(asin):
+    url = f"https://www.amazon.sa/dp/{asin}"
+    user_agents = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0",
+    ]
+    for attempt, ua in enumerate(user_agents):
+        try:
+            if attempt > 0:
+                time.sleep(2)
+            headers = {
+                "User-Agent": ua,
+                "Accept-Language": "ar-SA,ar;q=0.9,en-US;q=0.8",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "DNT": "1", "Connection": "keep-alive", "Upgrade-Insecure-Requests": "1",
+                "Cache-Control": "max-age=0", "Referer": "https://www.google.com/",
+            }
+            r = requests.get(url, headers=headers, timeout=30)
+            if r.status_code != 200 or len(r.text) < 5000:
+                continue
+            soup = BeautifulSoup(r.text, "html.parser")
+            title_elem = soup.select_one("#productTitle")
+            if not title_elem:
+                continue
+            full_title = title_elem.text.strip()
+            price = None
+            price_selectors = [
+                ".a-price.a-text-price.a-size-medium.apexPriceToPay .a-offscreen",
+                ".a-price.a-text-price.apexPriceToPay .a-offscreen",
+                ".a-price.aok-align-center .a-offscreen", ".a-price .a-offscreen",
+                "[data-a-color='price'] .a-offscreen", ".a-price-whole"
+            ]
+            for selector in price_selectors:
+                elem = soup.select_one(selector)
+                if elem and elem.text:
+                    price = elem.text.strip()
+                    if any(c.isdigit() for c in price):
                         break
-                    try:
-                        deal = parse_item(item, page_info['category'], 'best_sellers' in page_info['type'])
-                        if deal and is_valid_deal(deal):
-                            all_deals.append(deal)
-                    except Exception:
-                        continue
-
-                time.sleep(random.uniform(1.5, 3))
-
-            except Exception as e:
-                logger.error(f"Error in {page_info['category']}: {e}")
-
-        logger.info(f"Attempt {attempt + 1}: Collected {len(all_deals)} valid deals")
-
-    stats = page_rotator.get_stats()
-    logger.info(f"Total collected: {len(all_deals)} deals | Progress: {stats['progress_percent']:.1f}%")
-    return all_deals
-
-def filter_premium_deals(deals):
-    filtered = []
-    seen_ids_local = set()
-    used_asins = set()
-    random.shuffle(deals)
-
-    for deal in deals:
-        if len(filtered) >= TARGET_DEALS_COUNT:
-            break
-
-        pid = deal.get('id')
-        if not pid:
-            continue
-        if pid in seen_ids_local or pid in sent_products:
-            continue
-        if is_similar_product(deal.get('title', '')):
-            continue
-
-        asin = extract_asin(deal.get('link', '') or '')
-        if asin and asin in used_asins:
-            continue
-
-        filtered.append(deal)
-        seen_ids_local.add(pid)
-        if asin:
-            used_asins.add(asin)
-
-    filtered.sort(key=lambda d: (d.get('discount', 0), d.get('rating', 0)), reverse=True)
-    return filtered[:TARGET_DEALS_COUNT]
-
-def send_deals_to_telegram(chat_id, deals):
-    if not updater:
-        logger.warning("Updater not initialized")
-        return
-
-    bot = updater.bot
-    for deal in deals:
-        try:
-            text = (
-                f"{deal.get('title')}\n"
-                f"السعر: {deal.get('price')} ريال\n"
-                f"الخصم: {deal.get('discount')}%\n"
-                f"التقييم: {deal.get('rating')}\n"
-                f"{deal.get('link')}"
-            )
-            bot.send_message(chat_id=chat_id, text=text)
-            with state_lock:
-                sent_products.add(deal.get('id'))
-                sent_hashes.add(create_title_hash(deal.get('title', '')))
-            time.sleep(random.uniform(0.5, 1.5))
+            old_price = None
+            old_selectors = [
+                ".a-price.a-text-price[data-a-color='secondary'] .a-offscreen",
+                ".a-price.a-text-price .a-offscreen", ".basisPrice .a-offscreen",
+            ]
+            for selector in old_selectors:
+                elem = soup.select_one(selector)
+                if elem and elem.text:
+                    text = elem.text.strip()
+                    if text != price and any(c.isdigit() for c in text):
+                        old_price = text
+                        break
+            seller_name, seller_rating = get_seller_info(soup)
+            current_price_num = extract_number(price) if price else 0
+            all_coupons = get_all_coupons(soup, current_price_num)
+            if price:
+                arabic_title = smart_arabic_title(full_title)
+                return {
+                    "name": arabic_title, "price": price, "old_price": old_price,
+                    "seller_name": seller_name, "seller_rating": seller_rating,
+                    "all_coupons": all_coupons, "current_price_num": current_price_num,
+                }
         except Exception as e:
-            logger.warning(f"Failed to send deal: {e}")
+            print(f"Attempt {attempt + 1} failed: {e}")
+            continue
+    return None
 
-def run_scan(chat_id, status_message_id=None):
-    global is_scanning
-    if is_scanning:
-        logger.info("Scan already running")
+
+def generate_post(product_data, original_url):
+    name = product_data["name"]
+    price = product_data["price"]
+    old_price = product_data["old_price"]
+    all_coupons = product_data["all_coupons"]
+    current_price_num = product_data["current_price_num"]
+    category = detect_product_category(name)
+    gender = detect_product_gender(name)
+    clean_current = clean_price(price)
+    clean_old = clean_price(old_price) if old_price else None
+    old_num = extract_number(old_price) if old_price else 0
+    context_parts = []
+    if clean_old and old_num > current_price_num:
+        context_parts.append(f"السعر السابق {clean_old} والحالي {clean_current}")
+    if all_coupons:
+        best = all_coupons[0]
+        context_parts.append(f"كود {best['code']} خصم {best['percent']}% يصير بـ {best['final_price']} ريال")
+        if len(all_coupons) > 1:
+            context_parts.append(f"وفيه كوبونات ثانية")
+    context = " | ".join(context_parts)
+    opening = generate_ai_sentence(name, category, gender, context)
+    emoji = get_category_emoji(category)
+    parts = []
+    parts.append(opening)
+    parts.append(f"{emoji} {name}")
+    price_lines = []
+    if clean_old and old_num > current_price_num:
+        price_lines.append(f"❌ السعر السابق: {clean_old}")
+    price_lines.append(f"✅ السعر الحالي: {clean_current}")
+    parts.append("\n".join(price_lines))
+    if all_coupons:
+        best = all_coupons[0]
+        if best["final_price"] > 0 and best["final_price"] != int(current_price_num):
+            parts.append(f"🎟️ مع كود {best['code']} (خصم {best['percent']}%) يطلع بـ {best['final_price']} ريال 🔥")
+        elif best["percent"] > 0:
+            parts.append(f"🎟️ كود {best['code']} (خصم {best['percent']}%)")
+        if len(all_coupons) > 1:
+            extra_lines = ["💡 عروض إضافية تخفض زيادة:"]
+            for c in all_coupons[1:3]:
+                extra_lines.append(f"   • كود {c['code']} (خصم {c['percent']}%)")
+            parts.append("\n".join(extra_lines))
+    parts.append(f"رابط الشراء 👇🏻\n{original_url}")
+    return "\n\n".join(parts)
+
+
+def generate_ai_sentence(product_name, category, gender, context):
+    gender_hint = ""
+    if gender == "women":
+        gender_hint = "المنتج نسائي، وجه الجملة للبنات"
+    elif gender == "men":
+        gender_hint = "المنتج رجالي، وجه الجملة للرجال"
+    else:
+        gender_hint = "المنتج للجنسين"
+    styles = [
+        "افتتح بأسلوب تهويلي صاروخي (مثل: 'انفجار سعر!'، 'صدمة!'، 'مستحيل!'، 'تخيلوا!')",
+        "افتتح بأسلوب صياد لقى كنز (مثل: 'غنيمة العمر!'، 'صفقة تاريخية!'، 'هجمة!'، 'صطولة!')",
+        "افتتح بأسلوب مفاجأة صادمة (مثل: 'صدمووو!'، 'تبي تصدق!'، 'عقلك راح ينفجر!'، 'لا يفوتك!')",
+        "افتتح بأسلوب تحدي (مثل: 'جربوا تصدقوا!'، 'أقوى صفقة!'، 'ما راح تلقى مثلها!'، 'فرصة وحيدة!')",
+        "افتتح بأسلوب فزعة (مثل: 'عاجل!'، 'هيّا!'، 'بسرعة!'، 'الحين الحين!'، 'قبل ما ينتهي!')",
+    ]
+    chosen_style = random.choice(styles)
+    prompt = f"""أنت كاتب محتوى سعودي خليجي محترف في قناة تليجرام "صيدات وصفقات" للتسويق بالعمولة.
+اكتب جملة افتتاحية قصيرة جداً (سطر واحد فقط، 4-10 كلمات كحد أقصى) باللهجة السعودية الخليجية.
+
+🔹 قواعد مهمة:
+- الجملة لازم تكون مختصرة جداً (تنفع تغريدة تويتر)
+- استخدم إيموجي (2-3 إيموجي) في الجملة نفسها
+- الجملة لازم تكون بأسلوب تهويلي حماسي صادم يشد العين فوراً
+- أسلوب التهويل: صدمة، انفجار، غنيمة، صفقة خرافية، فرصة مجنونة، توفير جنوني
+- بلهجة سعودية خليجية كريمة (مثل: "يستاهل"، "فرصة"، "صفقة"، "غنيمة"، "هجمة"، "صطولة")
+- ❌ ممنوع: "ياجدعان", "ياجماعة", "يالله يا شباب", "حياكم", "يالا"
+- ❌ ممنوع أي أمثلة جاهزة أو نمط ثابت
+- ❌ ممنوع تكرار نفس الجملة أو نفس الأسلوب
+- ❌ ممنوع استخدام كلمة "صيدة" أو "لازم تشوفها"
+- كل مرة اكتب جملة مختلفة تماماً بناءً على المنتج والسياق
+- الأسلوب المطلوب: {chosen_style}
+
+🔹 {gender_hint}
+
+🔹 المنتج: {product_name}
+🔹 الفئة: {category}
+🔹 المعلومات المتاحة: {context}
+
+اكتب جملة واحدة فقط بدون أي مقدمة:"""
+    try:
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        data = {
+            "model": "llama-3.3-70b-versatile",
+            "messages": [
+                {"role": "system", "content": "أنت كاتب محتوى سعودي خليجي في قناة 'صيدات وصفقات'. تكتب جمل افتتاحية قصيرة بأسلوب تهويلي صادم. أسلوبك: صدمة، انفجار، غنيمة، صفقة خرافية. بلهجة سعودية خليجية. كل مرة تكتب جملة مختلفة تماماً. ممنوع الأمثلة الجاهزة. ممنوع التكرار. ممنوع استخدام كلمة 'صيدة' أو 'لازم تشوفها'."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.99, "max_tokens": 40
+        }
+        r = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=data, timeout=20)
+        if r.status_code == 200:
+            result = r.json()
+            sentence = result["choices"][0]["message"]["content"].strip()
+            sentence = sentence.replace('"', '').replace("'", "").strip()
+            sentence = re.sub(r'^[ـ\s]+', '', sentence)
+            vulgar_calls = ["ياجدعان", "ياجماعه", "ياجماعة", "يالله يا", "حياكم", "يالا", "يالله"]
+            for vulgar in vulgar_calls:
+                if vulgar in sentence.lower().replace(" ", ""):
+                    return generate_fallback_sentence(category)
+            return sentence
+    except Exception as e:
+        print(f"Groq error: {e}")
+    return generate_fallback_sentence(category)
+
+
+def generate_fallback_sentence(category):
+    fallbacks = [
+        "💥 انفجار سعر مجنون! 🔥", "🎯 غنيمة العمر وصلت! ⚡️", "💰 صفقة تاريخية بانتظارك! 🚀",
+        "🔥 صدمة سعر لا تُصدق! 💎", "⚡️ فرصة مجنونة قبل تفوت! 💸", "💎 كنز ببلاش تقريباً! 🏆",
+        "🚀 هجمة أسعار لا تُفوت! 🔥", "💸 توفير جنوني شفتوه! ⚡️", "🔥 مستحيل تلقى مثلها! 💰",
+        "⚡️ عاجل! صفقة صطورة! 🎯",
+    ]
+    return random.choice(fallbacks)
+
+
+# الدالة المحدثة لاستقبال ومعالجة حتى 80 رابط بدون إرسال صور
+@bot.message_handler(func=lambda m: True)
+def handler(msg):
+    text = msg.text.strip()
+    urls = re.findall(r'https?://\S+', text)
+
+    if not urls:
+        bot.reply_to(msg, "❌ يرجى إرسال روابط المنتجات")
         return
 
-    is_scanning = True
-    try:
-        all_deals = search_all_deals(chat_id, status_message_id)
-        if not all_deals:
-            logger.info("No deals found")
-            return
-        final_deals = filter_premium_deals(all_deals)
-        logger.info(f"Selected {len(final_deals)} deals to send")
-        send_deals_to_telegram(chat_id, final_deals)
-        save_database()
-        page_rotator.save_state()
-    finally:
-        is_scanning = False
+    # تحديد سقف معالجة الروابط إلى 80 رابط فقط في الرسالة الواحدة
+    valid_urls = urls[:80]
+    total_urls = len(valid_urls)
+    
+    wait = bot.reply_to(msg, f"⏳ جاري تحليل وإرسال {total_urls} منتج بدون صور...")
 
-def start_command(update: Update, context: CallbackContext):
-    update.message.reply_text("البوت يعمل. استخدم /scan_now للتشغيل و /status لمعرفة الحالة.")
+    processed_count = 0
+    for original_url in valid_urls:
+        expanded = expand_url(original_url)
 
-def status_command(update: Update, context: CallbackContext):
-    stats = page_rotator.get_stats()
-    text = (
-        f"Pages: {stats['total_pages']}\n"
-        f"Visited: {stats['visited_pages']}\n"
-        f"Remaining: {stats['remaining_pages']}\n"
-        f"Rotation: {stats['rotation_count']}\n"
-        f"Progress: {stats['progress_percent']:.1f}%\n"
-        f"Scanning: {is_scanning}"
-    )
-    update.message.reply_text(text)
+        if not is_saudi_amazon(expanded):
+            continue
 
-def scan_now_command(update: Update, context: CallbackContext):
-    msg = update.message.reply_text("Starting scan... سأرسل النتائج بعد الانتهاء.")
-    t = Thread(target=run_scan, args=(update.message.chat_id, msg.message_id), daemon=True)
-    t.start()
+        asin = extract_asin(expanded)
+        if not asin:
+            continue
 
-def graceful_shutdown(signum, frame):
-    logger.info(f"Signal {signum} received, shutting down...")
-    stop_event.set()
-    try:
-        save_database()
-        page_rotator.save_state()
-    except Exception:
-        pass
-    if updater:
+        product = get_product(asin)
+        if not product:
+            continue
+
+        post = generate_post(product, original_url)
+
         try:
-            updater.stop()
-        except Exception:
-            pass
-    raise SystemExit(128 + signum)
+            # تم حذف إرسال الصور نهائياً، الإرسال نصي فقط لتفادي قيود تليجرام وبطء التحميل
+            bot.send_message(msg.chat.id, post)
+            processed_count += 1
+            # تأخير بسيط جداً لحماية الحساب من حظر سبام تليجرام (Flood Control)
+            time.sleep(1.5)
+        except Exception as e:
+            print(f"Error sending text: {e}")
+            time.sleep(5)  # في حال وجود ضغط على السيرفر، انتظر قليلاً ثم تابع
 
-def cleanup():
     try:
-        save_database()
-        page_rotator.save_state()
-    except Exception:
+        bot.edit_message_text(f"✅ تم الانتهاء! تم إرسال {processed_count} من أصل {total_urls} منتج بنجاح.", msg.chat.id, wait.message_id)
+    except:
         pass
 
-def main():
-    global updater
 
-    load_database()
-    page_rotator.generate_all_pages(CATEGORIES_DEF)
-    page_rotator.load_state()
-
-    atexit.register(cleanup)
-    signal.signal(signal.SIGINT, graceful_shutdown)
-    signal.signal(signal.SIGTERM, graceful_shutdown)
-
-    updater = Updater(token=TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-    dp.add_handler(CommandHandler("start", start_command))
-    dp.add_handler(CommandHandler("status", status_command))
-    dp.add_handler(CommandHandler("scan_now", scan_now_command))
-
-    updater.start_polling()
-    logger.info("Bot started successfully.")
-    updater.idle()
-
-if __name__ == "__main__":
-    main()
+# حلقة تشغيل قوية تضمن بقاء البوت حياً ويعيد تشغيل نفسه تلقائياً دون توقف 24 ساعة
+if __name__ == '__main__':
+    print("🤖 البوت يعمل الآن ومحمي من التوقف 24 ساعة...")
+    while True:
+        try:
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception as e:
+            print(f"🔄 حدث خطأ في الاتصال ({e}). سيتم إعادة تشغيل البوت تلقائياً خلال 5 ثوانٍ...")
+            time.sleep(5)
