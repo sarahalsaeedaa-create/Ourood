@@ -12,6 +12,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from flask import Flask
 from collections import deque
+from urllib.parse import quote_plus
 import pandas as pd
 
 from telegram import Bot, Update
@@ -72,10 +73,10 @@ MIN_DISCOUNT = 70  # حد الخصم الأدنى 70%
 # ========== عدد الصفحات لكل قسم (موسّع) ==========
 # ملاحظة: أمازون غالباً بيوقف النتائج بعد ~20 صفحة، والبوت بيتخطى الصفحات الفاضية تلقائياً
 PAGES_CONFIG = {
-    'huge_cat': 40,
-    'now_cat': 30,
-    'deal_cat': 30,
-    'best_cat': 40,   # بحث مرتب بالأكثر مبيعاً + خصم 70%
+    'huge_cat': 100,
+    'now_cat': 100,
+    'deal_cat': 100,
+    'best_cat': 100,  # بحث مرتب بالأكثر مبيعاً + خصم 70%
     'bs_list': 2,     # صفحات قوائم الأكثر مبيعاً الرسمية من أمازون (غالباً صفحتين)
 }
 
@@ -188,6 +189,67 @@ CATEGORIES_DEF += [
 
 BEST_TYPES = ('best_cat', 'bs_list')
 
+# ========== مئات الأقسام الإضافية (كلمات بحث) ==========
+# كل كلمة بتتحول لقسمين: (1) خصم 70%+ عادي  (2) خصم 70%+ مرتب بالأكثر مبيعاً
+_KEYWORDS_RAW = """
+laptop,gaming laptop,tablet,iphone,samsung galaxy,smartphone,phone case,screen protector,charger,power bank,
+usb cable,earbuds,headphones,bluetooth speaker,smart watch,fitness tracker,camera,action camera,drone,tv,
+monitor,keyboard,mouse,gaming chair,ssd,hard drive,flash drive,memory card,router,printer,ink cartridge,
+webcam,microphone,projector,playstation,xbox,nintendo switch,game controller,vr headset,smart home,
+security camera,led lights,vacuum cleaner,robot vacuum,air conditioner,fan,heater,refrigerator,
+washing machine,microwave,blender,coffee machine,electric kettle,toaster,rice cooker,air fryer,iron,
+water dispenser,air purifier,humidifier,dishwasher,cookware,frying pan,knife set,food storage,lunch box,
+thermos,mug,dinnerware,cutlery,towels,bed sheets,pillow,mattress,blanket,curtains,carpet,sofa,desk,
+office chair,bookshelf,storage box,organizer,mirror,wall art,candles,lamp,light bulb,tool set,drill,
+screwdriver,garden,plant pot,bbq grill,men shirt,men t-shirt,jeans,jacket,hoodie,thobe,shoes,sneakers,
+sandals,boots,abaya,dress,handbag,backpack,luggage,wallet,belt,sunglasses,men watch,women watch,jewelry,
+necklace,ring,earrings,socks,underwear,pajamas,sportswear,scarf,hijab,kids clothes,baby clothes,
+men perfume,women perfume,oud,bakhoor,makeup,lipstick,foundation,mascara,eyeshadow,nail polish,skincare,
+face cream,serum,sunscreen,hair dryer,hair straightener,hair oil,conditioner,beard trimmer,shaver,
+electric toothbrush,body lotion,deodorant,shower gel,protein powder,supplements,thermometer,
+blood pressure monitor,dumbbells,yoga mat,treadmill,bicycle,football,gym bag,camping,tent,fishing,
+swimwear,running shoes,lego,dolls,toy cars,board games,puzzle,stroller,car seat,baby bottle,baby toys,
+school bag,stationery,notebook,pens,art supplies,books,car accessories,car cleaning,car charger,dash cam,
+tires,engine oil,seat covers,cat food,dog food,cat litter,pet toys,aquarium,
+عطور,ساعات,جوالات,سماعات,شنط,أحذية,ملابس رجالية,ملابس نسائية,ملابس أطفال,مكياج,عناية بالبشرة,
+أجهزة منزلية,أدوات مطبخ,مفروشات,ألعاب أطفال,هدايا,دخون,بخور,عبايات,ثياب,شماغ,نظارات,حقائب,
+ديكور,إضاءة,أثاث,مستلزمات حيوانات,أدوات رياضية,دراجات,كاميرات,طابعات,شاشات,لابتوب,تابلت
+"""
+_KEYWORDS = [k.strip() for k in _KEYWORDS_RAW.replace("\n", "").split(",") if k.strip()]
+
+_NOW_KEYWORDS_RAW = """
+rice,pasta,flour,cooking oil,sugar,salt,spices,tea,coffee,milk,cheese,yogurt,butter,eggs,chicken,beef,
+lamb,fish,shrimp,bread,cereal,oats,honey,jam,nuts,dates,chocolate,candy,chips,biscuits,cookies,juice,
+soda,water,energy drink,canned tuna,canned beans,tomato paste,sauce,ketchup,mayonnaise,olives,pickles,
+noodles,instant soup,frozen vegetables,ice cream,baby formula,baby cereal,diapers,baby wipes,tissues,
+toilet paper,detergent,fabric softener,dishwashing liquid,floor cleaner,air freshener,trash bags,
+aluminum foil,sponge,toothpaste,soap,shampoo,sanitary pads,razor,cat food,dog food,cat litter,vitamins,
+أرز,مكرونة,زيت,سكر,شاي,قهوة,حليب,جبن,لبن,بيض,دجاج,لحم,سمك,خبز,عسل,تمر,مكسرات,شوكولاتة,عصير,مياه,
+منظفات,حفاضات,مناديل,معجون أسنان,شامبو
+"""
+_NOW_KEYWORDS = [k.strip() for k in _NOW_KEYWORDS_RAW.replace("\n", "").split(",") if k.strip()]
+
+for _kw in _KEYWORDS:
+    _q = quote_plus(_kw)
+    _base = f"https://www.amazon.sa/s?k={_q}&rh=p_8%3A70-"
+    CATEGORIES_DEF.append((_base, f"🔎 {_kw}", 'huge_cat'))
+    CATEGORIES_DEF.append((_base + _POP, f"⭐ الأكثر مبيعاً - {_kw}", 'best_cat'))
+
+for _kw in _NOW_KEYWORDS:
+    _q = quote_plus(_kw)
+    _base = f"https://www.amazon.sa/s?k={_q}&rh=p_8%3A70-"
+    CATEGORIES_DEF.append((_base, f"⚡ Now - {_kw}", 'now_cat'))
+    CATEGORIES_DEF.append((_base + _POP, f"⚡ Now Top - {_kw}", 'now_cat'))
+
+# إزالة أي قسم مكرر (نفس الرابط) عشان منضيعش طلبات على صفحات متكررة
+_seen_urls = set()
+_dedup = []
+for _u, _n, _t in CATEGORIES_DEF:
+    if _u not in _seen_urls:
+        _seen_urls.add(_u)
+        _dedup.append((_u, _n, _t))
+CATEGORIES_DEF = _dedup
+
 # ========== نظام تدوير الصفحات الشامل المستمر بلا نهاية ==========
 class PageRotationManager:
     def __init__(self):
@@ -232,6 +294,10 @@ class PageRotationManager:
 
         random.shuffle(amazon_pages)
         random.shuffle(now_pages)
+        # ترتيب بالعرض: صفحة 1 لكل الأقسام الأول، بعدين صفحة 2... (الترتيب ثابت فالخلط بيفضل جوه كل رقم صفحة)
+        # كده لما قسم يخلص عند صفحة ~20 بنعرف قبل ما نطلب الصفحات 21-100 ونتخطاها
+        amazon_pages.sort(key=lambda p: p['page_num'])
+        now_pages.sort(key=lambda p: p['page_num'])
 
         self.page_queue_amazon = deque(amazon_pages)
         self.page_queue_now = deque(now_pages)
