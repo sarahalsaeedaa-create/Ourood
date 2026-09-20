@@ -4,7 +4,6 @@ import json
 import logging
 import requests
 import cloudscraper
-import asyncio
 import time
 import random
 import hashlib
@@ -15,14 +14,8 @@ from flask import Flask
 from collections import deque
 import pandas as pd
 
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
-)
+from telegram import Bot, Update
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from fake_useragent import UserAgent
 
 logging.basicConfig(
@@ -214,7 +207,6 @@ def load_database():
                 data = json.load(f)
                 sent_log = data.get('sent_log', {})
                 hash_log = data.get('hash_log', {})
-                # توافق مع النسخة القديمة (بدون تواريخ)
                 if not sent_log and data.get('ids'):
                     sent_log = {i: datetime.now().isoformat() for i in data.get('ids', [])}
                 if not hash_log and data.get('hashes'):
@@ -269,7 +261,7 @@ def create_title_hash(title):
     clean = re.sub(r'[^\w\s]', '', title.lower())
     clean = re.sub(r'\s+', ' ', clean).strip()
     clean = re.sub(r'\d+', '', clean)
-    for word in ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'shipped', 'شحن']:
+    for word in ['amazon', 'saudi', 'ريال', 'sar', 'new', 'جديد', 'شحن']:
         clean = clean.replace(word, '')
     return hashlib.md5(clean[:30].strip().encode()).hexdigest()[:16]
 
@@ -323,7 +315,6 @@ def fetch_page(session, url):
             pass
     return None
 
-# ========== إعدادات عدد الصفحات لكل نوع قسم ==========
 PAGES_CONFIG = {
     'best_sellers': 3,
     'deals': 4,
@@ -348,11 +339,10 @@ PAGES_CONFIG = {
     'now_daily_deals': 5,
     'now_breakfast': 4,
     'now_pantry': 4,
-    'dept': 4,        # الأقسام العامة الجديدة
+    'dept': 4,
 }
 
 CATEGORIES_DEF = [
-    # ==== Amazon Now Fresh & Grocery ====
     ("https://www.amazon.sa/s?k=fresh&rh=p_8%3A70-", "⚡ Amazon Now Fresh", 'now'),
     ("https://www.amazon.sa/s?k=amazon+now&rh=p_8%3A70-", "⚡ Amazon Now Deals", 'now_daily_deals'),
     ("https://www.amazon.sa/s?k=supermarket&rh=p_8%3A70-", "🛒 Supermarket Deals", 'now_supermarket'),
@@ -372,20 +362,17 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?k=breakfast&rh=p_8%3A70-", "🥣 Breakfast & Cereal", 'now_breakfast'),
     ("https://www.amazon.sa/s?k=rice+and+pasta&rh=p_8%3A70-", "🍚 Rice & Pasta", 'now_pantry'),
 
-    # ==== عروض أمازون العامة ====
     ("https://www.amazon.sa/s?rh=p_8%3A70-99", "🔥 All Deals 70% Off", 'deals'),
     ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox Today Deals", 'deals'),
     ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse Deals", 'warehouse'),
     ("https://www.amazon.sa/outlet", "🎁 Outlet Store", 'outlet'),
 
-    # ==== Best Sellers ====
     ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/grocery", "🥫 Grocery Best Seller", 'best_sellers'),
     ("https://www.amazon.sa/gp/bestsellers/home", "🏠 Home Best Seller", 'best_sellers'),
 
-    # ==== أقسام جديدة (خصم 70%+) ====
     ("https://www.amazon.sa/s?k=toys&rh=p_8%3A70-", "🧸 Toys & Games", 'dept'),
     ("https://www.amazon.sa/s?k=sports&rh=p_8%3A70-", "⚽ Sports & Outdoors", 'dept'),
     ("https://www.amazon.sa/s?k=kitchen&rh=p_8%3A70-", "🍳 Kitchen & Dining", 'dept'),
@@ -482,13 +469,12 @@ def parse_item(item, category, is_best_seller):
         'id': get_product_id({'title': title, 'link': link, 'price': price})
     }
 
-async def send_deal(bot, deal, target_chat_id=None):
+def send_deal(bot, deal, target_chat_id=None):
     global sent_products, sent_hashes
 
     chat_id = target_chat_id or TELEGRAM_CHAT_ID
     deal_id = deal['id']
 
-    # ممنوع إعادة الإرسال قبل مرور أسبوع
     if is_on_cooldown(deal_id, deal['title']):
         return False
 
@@ -514,24 +500,23 @@ async def send_deal(bot, deal, target_chat_id=None):
 🔗 [عرض المنتج على Amazon]({deal['link']})
     """
     try:
-        await bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+        bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
 
         now_iso = datetime.now().isoformat()
         h = create_title_hash(deal['title'])
         sent_products.add(deal_id)
         sent_hashes.add(h)
-        sent_log[deal_id] = now_iso      # تسجيل تاريخ الإرسال (لمنع الإعادة لأسبوع)
+        sent_log[deal_id] = now_iso
         hash_log[h] = now_iso
         save_database()
-        export_to_excel([deal])          # تسجيل في الشيت مرة واحدة
+        export_to_excel([deal])
         logger.info(f"✅ Sent Deal: {deal['title'][:30]} - Discount: {deal['discount']}%")
         return True
     except Exception as e:
         logger.error(f"Error sending deal: {e}")
         return False
 
-async def scan_batch_and_send(bot, target_chat_id=None, limit=10):
-    """فحص دفعة واحدة من صفحات جديدة تماماً (مش متزورة قبل كده)"""
+def scan_batch_and_send(bot, target_chat_id=None, limit=10):
     session = create_session()
     pages = page_rotator.get_balanced_batch(batch_size=limit)
     found_count = 0
@@ -541,7 +526,7 @@ async def scan_batch_and_send(bot, target_chat_id=None, limit=10):
 
     for page_info in pages:
         html = fetch_page(session, page_info['url'])
-        page_rotator.mark_visited(page_info['id'])  # الصفحة دي خلاص اتزارت، مش هنرجعلها
+        page_rotator.mark_visited(page_info['id'])
 
         if not html:
             continue
@@ -556,14 +541,13 @@ async def scan_batch_and_send(bot, target_chat_id=None, limit=10):
         for item in items:
             deal = parse_item(item, page_info['category'], 'best_sellers' in page_info['type'])
             if deal and is_valid_deal(deal):
-                if await send_deal(bot, deal, target_chat_id=target_chat_id):
+                if send_deal(bot, deal, target_chat_id=target_chat_id):
                     found_count += 1
 
-        await asyncio.sleep(random.uniform(1, 2))
+        time.sleep(random.uniform(1, 2))
     return found_count
 
-async def auto_scan_and_send(bot):
-    """الفحص التلقائي المستمر - كل صفحة مرة واحدة فقط، وبعد أسبوع بيتحدث كل حاجة"""
+def auto_scan_and_send(bot):
     if not page_rotator.all_pages:
         page_rotator.generate_all_pages(CATEGORIES_DEF)
         page_rotator.load_state()
@@ -571,26 +555,25 @@ async def auto_scan_and_send(bot):
     while True:
         try:
             if not page_rotator.has_unvisited():
-                # كل الصفحات اتفحصت - استنى الأسبوع يعدي وبعدين افتحها من تاني
                 page_rotator.reset_old_visits()
                 if not page_rotator.has_unvisited():
                     logger.info("✅ All pages visited. Waiting for weekly reset...")
-                    await asyncio.sleep(3600)  # كل ساعة بيشيك لو الأسبوع عدى
+                    time.sleep(3600)
                     continue
 
-            await scan_batch_and_send(bot)
-            await asyncio.sleep(15)
+            scan_batch_and_send(bot)
+            time.sleep(15)
         except Exception as e:
             logger.error(f"Error in auto scan loop: {e}")
-            await asyncio.sleep(10)
+            time.sleep(10)
 
 # ========== معالجة الأوامر والرسائل النصية ==========
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🤖 أهلاً بك! البوت يعمل 24 ساعة للفحص التلقائي.\n\n💬 ابعت لي **\"هاي\"** في أي وقت وهبحث لك في صفحات جديدة تماماً عن أقوى العروض من أمازون وأمازون ناو!\n\n⏳ كل منتج بيترسل مرة واحدة بس ومبيترجعش إلا بعد أسبوع.")
+def start_cmd(update: Update, context: CallbackContext):
+    update.message.reply_text("🤖 أهلاً بك! البوت يعمل 24 ساعة للفحص التلقائي.\n\n💬 ابعت لي **\"هاي\"** في أي وقت وهبحث لك في صفحات جديدة تماماً عن أقوى العروض من أمازون وأمازون ناو!\n\n⏳ كل منتج بيترسل مرة واحدة بس ومبيترجعش إلا بعد أسبوع.")
 
-async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def status_cmd(update: Update, context: CallbackContext):
     stats = page_rotator.get_stats()
-    await update.message.reply_text(
+    update.message.reply_text(
         f"📊 *حالة البوت:*\n\n"
         f"📦 منتجات مبعوتة: {len(sent_log)}\n"
         f"🚫 إعادة الإرسال بعد: {RESEND_COOLDOWN_DAYS} أيام\n"
@@ -601,7 +584,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def clear_cmd(update: Update, context: CallbackContext):
     sent_products.clear()
     sent_hashes.clear()
     sent_log.clear()
@@ -610,25 +593,22 @@ async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     page_rotator._refill_queues()
     page_rotator.save_state()
     save_database()
-    await update.message.reply_text("🗑️ تم مسح كل السجلات! هيبدأ فحص جديد من الأول.")
+    update.message.reply_text("🗑️ تم مسح كل السجلات! هيبدأ فحص جديد من الأول.")
 
-async def handle_text_messages(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """الرد الفوري - كل بحث في صفحات جديدة تماماً"""
+def handle_text_messages(update: Update, context: CallbackContext):
     chat_id = update.message.chat_id
-
-    # لو فيه صفحات قديمة فات عليها أسبوع، افتحها من تاني
     page_rotator.reset_old_visits()
 
     if not page_rotator.has_unvisited():
-        await update.message.reply_text("✅ تم فحص جميع الصفحات حالياً! ⏳ الفحص بيتجدد تلقائياً بعد أسبوع من آخر زيارة لكل صفحة.")
+        update.message.reply_text("✅ تم فحص جميع الصفحات حالياً! ⏳ الفحص بيتجدد تلقائياً بعد أسبوع من آخر زيارة لكل صفحة.")
         return
 
-    await update.message.reply_text("🔎 جاري البحث فوراً في صفحات جديدة تماماً من أمازون وأمازون ناو بالتوازي... ⏳")
+    update.message.reply_text("🔎 جاري البحث فوراً في صفحات جديدة تماماً من أمازون وأمازون ناو بالتوازي... ⏳")
 
-    found = await scan_batch_and_send(context.bot, target_chat_id=chat_id, limit=8)
+    found = scan_batch_and_send(context.bot, target_chat_id=chat_id, limit=8)
 
     if found == 0:
-        await update.message.reply_text("👍 تم فحص الدفعة الحالية، مفيش عروض جديدة بخصم 70%+ دلوقتي. ابعتلي تاني وهفحصلك صفحات تانية جديدة!")
+        update.message.reply_text("👍 تم فحص الدفعة الحالية، مفيش عروض جديدة بخصم 70%+ دلوقتي. ابعتلي تاني وهفحصلك صفحات تانية جديدة!")
 
 def main():
     load_database()
@@ -639,22 +619,19 @@ def main():
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=keep_alive_ping, daemon=True).start()
 
-    # إنشاء التطبيق باستخدام الإصدار الأحدث من python-telegram-bot
-    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
 
-    application.add_handler(CommandHandler("start", start_cmd))
-    application.add_handler(CommandHandler("status", status_cmd))
-    application.add_handler(CommandHandler("clear", clear_cmd))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_messages))
+    threading.Thread(target=auto_scan_and_send, args=(updater.bot,), daemon=True).start()
 
-    # بدء حلقة الفحص التلقائي في الخلفية عند بدء تشغيل البوت
-    async def post_init(app):
-        asyncio.create_task(auto_scan_and_send(app.bot))
-
-    application.post_init = post_init
+    dp.add_handler(CommandHandler("start", start_cmd))
+    dp.add_handler(CommandHandler("status", status_cmd))
+    dp.add_handler(CommandHandler("clear", clear_cmd))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text_messages))
 
     logger.info("🤖 Telegram Bot ready & Scanning...")
-    application.run_polling(drop_pending_updates=True)
+    updater.start_polling(drop_pending_updates=True)
+    updater.idle()
 
 if __name__ == "__main__":
     main()
