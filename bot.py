@@ -28,7 +28,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8769441239:AAG4sl2y2qPdvK4
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "432826122")
 PORT = int(os.environ.get("PORT", 8080))
 
-RESEND_COOLDOWN_DAYS = 3  # منع إعادة إرسال "نفس المنتج" للمستخدم قبل 3 أيام لمنع التكرار المزعج
+RESEND_COOLDOWN_DAYS = 7  # منع إعادة إرسال "نفس المنتج" قبل أسبوع كامل
 
 # ========== Flask App for Keep-Alive ==========
 app = Flask(__name__)
@@ -69,11 +69,14 @@ hash_log = {}   # title_hash -> تاريخ آخر إرسال
 
 MIN_DISCOUNT = 70  # حد الخصم الأدنى 70%
 
-# ========== ضبط عدد الصفحات للأقسام بشكل موسع جداً (حتى 20 صفحة لكل قسم) ==========
+# ========== عدد الصفحات لكل قسم (موسّع) ==========
+# ملاحظة: أمازون غالباً بيوقف النتائج بعد ~20 صفحة، والبوت بيتخطى الصفحات الفاضية تلقائياً
 PAGES_CONFIG = {
-    'huge_cat': 20,
-    'now_cat': 15,
-    'deal_cat': 20,
+    'huge_cat': 40,
+    'now_cat': 30,
+    'deal_cat': 30,
+    'best_cat': 40,   # بحث مرتب بالأكثر مبيعاً + خصم 70%
+    'bs_list': 2,     # صفحات قوائم الأكثر مبيعاً الرسمية من أمازون (غالباً صفحتين)
 }
 
 # ========== توسيع الأقسام الشاملة (أمازون السعودية + أمازون ناو) ==========
@@ -122,6 +125,69 @@ CATEGORIES_DEF = [
     ("https://www.amazon.sa/s?i=watches&rh=p_8%3A70-", "⌚ الساعات 70% خصم", 'huge_cat'),
 ]
 
+# ========== إضافات: الأكثر مبيعاً + أقسام أمازون ناو الإضافية ==========
+_POP = "&s=exact-aware-popularity-rank"   # ترتيب النتائج بالأكثر مبيعاً/شعبية
+
+# 1) نفس أقسام أمازون ناو الحالية لكن مرتبة بالأكثر مبيعاً
+CATEGORIES_DEF += [
+    (u + _POP, n + " ⭐Top", t)
+    for (u, n, t) in list(CATEGORIES_DEF) if t == 'now_cat'
+]
+
+# 2) أقسام أمازون ناو / السوبرماركت إضافية (مرتبة بالأكثر مبيعاً)
+_EXTRA_NOW = [
+    ("grocery", "🛍️ Grocery"),
+    ("water", "💧 Water"),
+    ("coffee", "☕ Coffee"),
+    ("tea", "🍵 Tea"),
+    ("chocolate", "🍫 Chocolate & Sweets"),
+    ("juice", "🧃 Juice"),
+    ("cooking+oil", "🫒 Cooking Oil"),
+    ("sugar+and+salt", "🧂 Sugar & Salt"),
+    ("spices", "🌶️ Spices"),
+    ("canned+food", "🥫 Canned Food"),
+    ("nuts", "🥜 Nuts & Dried Fruits"),
+    ("dates", "🌴 Dates"),
+    ("diapers", "🍼 Diapers"),
+    ("tissues", "🧻 Tissues & Paper"),
+    ("laundry", "🧺 Laundry"),
+    ("dishwashing", "🍽️ Dishwashing"),
+    ("shampoo", "🧴 Shampoo & Hair Care"),
+    ("vitamins", "💊 Vitamins & Supplements"),
+    ("biscuits", "🍪 Biscuits & Cookies"),
+    ("noodles", "🍜 Noodles & Instant Food"),
+]
+CATEGORIES_DEF += [
+    (f"https://www.amazon.sa/s?k={kw}&rh=p_8%3A70-{_POP}", f"{label} (Now/Top)", 'now_cat')
+    for kw, label in _EXTRA_NOW
+]
+
+# 3) كل الأقسام الكبرى + عروض عامة لكن مرتبة بالأكثر مبيعاً
+CATEGORIES_DEF += [
+    (u + _POP, "⭐ الأكثر مبيعاً - " + n, 'best_cat')
+    for (u, n, t) in list(CATEGORIES_DEF) if t == 'huge_cat'
+]
+CATEGORIES_DEF.append(
+    ("https://www.amazon.sa/s?rh=p_8%3A70-99" + _POP, "⭐ الأكثر مبيعاً - كل الأقسام 70%+", 'best_cat')
+)
+
+# 4) قوائم الأكثر مبيعاً الرسمية من أمازون (قد تحتاج تعديل الـ slugs حسب الموقع)
+CATEGORIES_DEF += [
+    ("https://www.amazon.sa/gp/bestsellers", "🏆 Best Sellers - الكل", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/electronics", "🏆 Best Sellers - إلكترونيات", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/beauty", "🏆 Best Sellers - جمال", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/grocery", "🏆 Best Sellers - بقالة", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/kitchen", "🏆 Best Sellers - مطبخ", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/videogames", "🏆 Best Sellers - ألعاب فيديو", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/toys", "🏆 Best Sellers - ألعاب", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/sports", "🏆 Best Sellers - رياضة", 'bs_list'),
+    ("https://www.amazon.sa/gp/bestsellers/baby", "🏆 Best Sellers - أطفال", 'bs_list'),
+    ("https://www.amazon.sa/gp/movers-and-shakers", "📈 Movers & Shakers", 'bs_list'),
+    ("https://www.amazon.sa/gp/new-releases", "🆕 New Releases", 'bs_list'),
+]
+
+BEST_TYPES = ('best_cat', 'bs_list')
+
 # ========== نظام تدوير الصفحات الشامل المستمر بلا نهاية ==========
 class PageRotationManager:
     def __init__(self):
@@ -130,6 +196,7 @@ class PageRotationManager:
         self.page_queue_now = deque()
         self.all_pages = []
         self.rotation_count = 0
+        self.dead_from = {}  # base_url -> أول رقم صفحة طلع فاضي (نتخطى اللي بعده)
 
     def generate_all_pages(self, categories):
         self.all_pages = []
@@ -153,6 +220,9 @@ class PageRotationManager:
     def _build_page_url(self, base_url, page_num):
         if page_num == 1:
             return base_url
+        if '/bestsellers' in base_url or '/movers-and-shakers' in base_url or '/new-releases' in base_url:
+            separator = '&' if '?' in base_url else '?'
+            return f"{base_url}{separator}pg={page_num}"
         separator = '&' if '?' in base_url else '?'
         return f"{base_url}{separator}page={page_num}"
 
@@ -166,6 +236,22 @@ class PageRotationManager:
         self.page_queue_amazon = deque(amazon_pages)
         self.page_queue_now = deque(now_pages)
 
+    def mark_exhausted(self, base_url, page_num):
+        """تسجيل إن القسم ده خلصت صفحاته عند رقم معين"""
+        cur = self.dead_from.get(base_url)
+        if cur is None or page_num < cur:
+            self.dead_from[base_url] = page_num
+
+    def _pop_valid(self, queue):
+        while queue:
+            page = queue.popleft()
+            self.visited_pages.add(page['id'])
+            dead = self.dead_from.get(page['base_url'])
+            if dead is not None and page['page_num'] > dead:
+                continue  # صفحة بعد نهاية القسم، تخطى
+            return page
+        return None
+
     def get_balanced_batch(self, batch_size=10):
         """تجهيز دفعة صفحات؛ وفي حال انتهاء القائمة، يتم التحديث والتكرار فوراً"""
         batch = []
@@ -176,15 +262,13 @@ class PageRotationManager:
             self.restart_full_cycle()
 
         for _ in range(half):
-            if self.page_queue_amazon:
-                page = self.page_queue_amazon.popleft()
-                self.visited_pages.add(page['id'])
+            page = self._pop_valid(self.page_queue_amazon)
+            if page:
                 batch.append(page)
 
         for _ in range(half):
-            if self.page_queue_now:
-                page = self.page_queue_now.popleft()
-                self.visited_pages.add(page['id'])
+            page = self._pop_valid(self.page_queue_now)
+            if page:
                 batch.append(page)
 
         return batch
@@ -192,6 +276,7 @@ class PageRotationManager:
     def restart_full_cycle(self):
         """إعادة الدورة فوراً للبحث عن العروض الجديدة والمحدثة من أمازون"""
         self.visited_pages.clear()
+        self.dead_from.clear()
         self.rotation_count += 1
         self._refill_queues()
         logger.info(f"🔄 Completed Full Scan Cycle #{self.rotation_count}! Re-shuffling and restarting endless scan...")
@@ -236,7 +321,7 @@ def export_to_excel(deals):
     try:
         excel_file = 'amazon_deals.xlsx'
         df_new = pd.DataFrame(deals)
-        cols_to_keep = ['title', 'price', 'old_price', 'discount', 'category', 'type', 'link', 'id']
+        cols_to_keep = ['title', 'price', 'old_price', 'discount', 'category', 'type', 'is_best_seller', 'link', 'id']
         df_new = df_new[[c for c in cols_to_keep if c in df_new.columns]]
         df_new['date_added'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -325,7 +410,7 @@ def is_valid_deal(deal):
         return False
     return True
 
-def parse_item(item, category, is_best_seller):
+def parse_item(item, category, is_best_seller, cat_type=''):
     price = None
     price_el = item.select_one('.a-price .a-offscreen') or item.select_one('.a-price-whole') or item.select_one('.a-price')
     if price_el:
@@ -372,7 +457,8 @@ def parse_item(item, category, is_best_seller):
         return None
 
     title = ""
-    for sel in ['h2 a span', 'h2 span', '.a-size-base-plus', '.a-size-medium', '.a-size-mini span']:
+    for sel in ['h2 a span', 'h2 span', '.a-size-base-plus', '.a-size-medium', '.a-size-mini span',
+                '._cDEzb_p13n-sc-css-line-clamp-3_g3dy1', '.p13n-sc-truncate-desktop-type2']:
         el = item.select_one(sel)
         if el and len(el.text.strip()) > 5:
             title = el.text.strip()
@@ -387,6 +473,14 @@ def parse_item(item, category, is_best_seller):
         href = a['href']
         link = f"https://www.amazon.sa{href}" if href.startswith('/') else href
 
+    # كشف شارة "الأكثر مبيعاً" داخل نتائج البحث العادية
+    try:
+        badge_txt = ' '.join(b.get_text(' ', strip=True) for b in item.select('.a-badge-text, .a-badge-label, span.a-badge'))
+        if re.search(r'best\s*seller|الأكثر\s*مبيع', badge_txt, re.I):
+            is_best_seller = True
+    except Exception:
+        pass
+
     return {
         'title': title,
         'price': price,
@@ -394,6 +488,7 @@ def parse_item(item, category, is_best_seller):
         'discount': discount,
         'link': link,
         'category': category,
+        'type': cat_type,
         'is_best_seller': is_best_seller,
         'id': get_product_id({'title': title, 'link': link, 'price': price})
     }
@@ -408,10 +503,12 @@ def send_deal(bot, deal, target_chat_id=None):
         return False
 
     deal_type = f"💰 {deal['discount']}%"
-    if 'Warehouse' in deal['category']: deal_type = '🏭 WAREHOUSE'
-    elif 'Amazon Now' in deal['category'] or 'Now ' in deal['category'] or 'Fresh' in deal['category'] or 'Grocery' in deal['category'] or 'Supermarket' in deal['category'] or 'Fruits' in deal['category'] or 'Vegetables' in deal['category'] or 'Meat' in deal['category'] or 'Dairy' in deal['category'] or 'Bakery' in deal['category'] or 'Frozen' in deal['category'] or 'Drinks' in deal['category'] or 'Snacks' in deal['category'] or 'Breakfast' in deal['category'] or 'Rice' in deal['category'] or 'Baby Food' in deal['category'] or 'Pet Food' in deal['category']:
+    if 'Warehouse' in deal['category']:
+        deal_type = '🏭 WAREHOUSE'
+    elif deal.get('type') == 'now_cat':
         deal_type = '⚡ AMAZON NOW'
-    elif deal['is_best_seller']: deal_type = '⭐ BEST SELLER'
+    if deal['is_best_seller']:
+        deal_type = '⭐ BEST SELLER' if deal_type.startswith('💰') else f"{deal_type} ⭐ BEST SELLER"
 
     savings = round(deal['old_price'] - deal['price'], 2)
     sav_txt = f"💵 توفير: {savings:.2f} ريال\n" if savings > 0 else ""
@@ -429,7 +526,11 @@ def send_deal(bot, deal, target_chat_id=None):
 🔗 [عرض المنتج على Amazon]({deal['link']})
     """
     try:
-        bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+        try:
+            bot.send_message(chat_id=chat_id, text=msg, parse_mode='Markdown')
+        except Exception:
+            # لو الماركداون فشل بسبب رموز في العنوان، ابعت نص عادي
+            bot.send_message(chat_id=chat_id, text=msg)
 
         now_iso = datetime.now().isoformat()
         h = create_title_hash(deal['title'])
@@ -465,9 +566,20 @@ def scan_batch_and_send(bot, target_chat_id=None, limit=10):
             items = soup.find_all('div', class_='s-result-item')
         if not items:
             items = soup.find_all('li', class_='zg-item-immersion')
+        if not items:
+            items = soup.select('div#gridItemRoot')
+
+        if not items:
+            low = html.lower()
+            # لو مش كابتشا، يبقى القسم خلصت صفحاته؛ نتخطى الصفحات اللي بعدها
+            if 'captcha' not in low and 'robot check' not in low:
+                page_rotator.mark_exhausted(page_info['base_url'], page_info['page_num'])
+            continue
+
+        is_bs = page_info['type'] in BEST_TYPES
 
         for item in items:
-            deal = parse_item(item, page_info['category'], 'best_sellers' in page_info['type'])
+            deal = parse_item(item, page_info['category'], is_bs, page_info['type'])
             if deal and is_valid_deal(deal):
                 if send_deal(bot, deal, target_chat_id=target_chat_id):
                     found_count += 1
@@ -508,6 +620,7 @@ def clear_cmd(update: Update, context: CallbackContext):
     sent_log.clear()
     hash_log.clear()
     page_rotator.visited_pages.clear()
+    page_rotator.dead_from.clear()
     page_rotator._refill_queues()
     save_database()
     update.message.reply_text("🗑️ تم مسح سجل الإرسال وإعادة الفحص من البداية!")
