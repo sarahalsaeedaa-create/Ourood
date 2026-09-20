@@ -28,14 +28,14 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "8769441239:AAG4sl2y2qPdvK4
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "432826122")
 PORT = int(os.environ.get("PORT", 8080))
 
-RESEND_COOLDOWN_DAYS = 7  # إعادة إرسال نفس المنتج بعد أسبوع فقط
+RESEND_COOLDOWN_DAYS = 3  # منع إعادة إرسال "نفس المنتج" للمستخدم قبل 3 أيام لمنع التكرار المزعج
 
 # ========== Flask App for Keep-Alive ==========
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running!", 200
+    return "Bot is running continuously!", 200
 
 @app.route('/health')
 def health():
@@ -44,10 +44,9 @@ def health():
         "status": "ok",
         "products_sent": len(sent_log),
         "timestamp": datetime.now().isoformat(),
-        "pages": stats.get('total_pages', 0),
-        "visited": stats.get('visited_pages', 0),
-        "remaining": stats.get('remaining_pages', 0),
-        "progress": stats.get('progress_percent', 0)
+        "total_pages": stats.get('total_pages', 0),
+        "visited_in_loop": stats.get('visited_pages', 0),
+        "loop_count": stats.get('rotation_count', 0)
     }, 200
 
 def run_flask():
@@ -65,49 +64,77 @@ def keep_alive_ping():
 ua = UserAgent()
 sent_products = set()
 sent_hashes = set()
-sent_log = {}   # deal_id -> تاريخ آخر إرسال (منع الإعادة لأسبوع)
+sent_log = {}   # deal_id -> تاريخ آخر إرسال
 hash_log = {}   # title_hash -> تاريخ آخر إرسال
 
 MIN_DISCOUNT = 70  # حد الخصم الأدنى 70%
 
-# ========== نظام تدوير الصفحات الشامل (كل صفحة مرة واحدة فقط) ==========
+# ========== ضبط عدد الصفحات للأقسام بشكل موسع جداً (حتى 20 صفحة لكل قسم) ==========
+PAGES_CONFIG = {
+    'huge_cat': 20,
+    'now_cat': 15,
+    'deal_cat': 20,
+}
+
+# ========== توسيع الأقسام الشاملة (أمازون السعودية + أمازون ناو) ==========
+CATEGORIES_DEF = [
+    # --- قسم أمازون ناو و السوبرماركت (Amazon Now & Fresh) ---
+    ("https://www.amazon.sa/s?k=fresh&rh=p_8%3A70-", "⚡ Amazon Now Fresh", 'now_cat'),
+    ("https://www.amazon.sa/s?k=amazon+now&rh=p_8%3A70-", "⚡ Amazon Now Deals", 'now_cat'),
+    ("https://www.amazon.sa/s?k=supermarket&rh=p_8%3A70-", "🛒 Supermarket Deals", 'now_cat'),
+    ("https://www.amazon.sa/s?k=groceries&rh=p_8%3A70-", "🛒 Groceries 70% Off", 'now_cat'),
+    ("https://www.amazon.sa/s?k=fruits&rh=p_8%3A70-", "🍎 Fruits", 'now_cat'),
+    ("https://www.amazon.sa/s?k=vegetables&rh=p_8%3A70-", "🥬 Vegetables", 'now_cat'),
+    ("https://www.amazon.sa/s?k=meat&rh=p_8%3A70-", "🥩 Meat & Poultry", 'now_cat'),
+    ("https://www.amazon.sa/s?k=dairy&rh=p_8%3A70-", "🥛 Dairy & Eggs", 'now_cat'),
+    ("https://www.amazon.sa/s?k=bakery&rh=p_8%3A70-", "🍞 Bakery", 'now_cat'),
+    ("https://www.amazon.sa/s?k=frozen&rh=p_8%3A70-", "🧊 Frozen Food", 'now_cat'),
+    ("https://www.amazon.sa/s?k=drinks&rh=p_8%3A70-", "🥤 Drinks & Beverages", 'now_cat'),
+    ("https://www.amazon.sa/s?k=snacks&rh=p_8%3A70-", "🍿 Snacks", 'now_cat'),
+    ("https://www.amazon.sa/s?k=baby+food&rh=p_8%3A70-", "👶 Baby Food", 'now_cat'),
+    ("https://www.amazon.sa/s?k=pet+food&rh=p_8%3A70-", "🐾 Pet Food", 'now_cat'),
+    ("https://www.amazon.sa/s?k=cleaning&rh=p_8%3A70-", "🧼 Cleaning Products", 'now_cat'),
+    ("https://www.amazon.sa/s?k=personal+care&rh=p_8%3A70-", "🧴 Personal Care", 'now_cat'),
+    ("https://www.amazon.sa/s?k=breakfast&rh=p_8%3A70-", "🥣 Breakfast & Cereal", 'now_cat'),
+    ("https://www.amazon.sa/s?k=rice+and+pasta&rh=p_8%3A70-", "🍚 Rice & Pasta", 'now_cat'),
+
+    # --- عروض التصفية والمستودع والذهب ---
+    ("https://www.amazon.sa/s?rh=p_8%3A70-99", "🔥 All Deals 70% Off", 'deal_cat'),
+    ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox Today Deals", 'deal_cat'),
+    ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse Deals", 'deal_cat'),
+    ("https://www.amazon.sa/outlet", "🎁 Outlet Store", 'deal_cat'),
+
+    # --- الأقسام الكبرى على أمازون (تغطية شاملة) ---
+    ("https://www.amazon.sa/s?i=electronics&rh=p_8%3A70-", "📱 الإلكترونيات", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=mobile-apps&rh=p_8%3A70-", "📲 الجوالات والإكسسوارات", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=fashion&rh=p_8%3A70-", "👕 الأزياء والموضة", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=beauty&rh=p_8%3A70-", "💄 العناية والجمال", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=home&rh=p_8%3A70-", "🏠 المنزل والمطبخ", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=computers&rh=p_8%3A70-", "💻 الكمبيوتر والملحقات", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=videogames&rh=p_8%3A70-", "🎮 الألعاب والألعاب الإلكترونية", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=toys&rh=p_8%3A70-", "🧸 الألعاب والترفيه", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=sports&rh=p_8%3A70-", "⚽ الرياضة واللياقة", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=automotive&rh=p_8%3A70-", "🚗 السيارات والإكسسوارات", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=baby-products&rh=p_8%3A70-", "🍼 مستلزمات الأطفال", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=office-products&rh=p_8%3A70-", "📎 المستلزمات المكتبية", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=hi-tech&rh=p_8%3A70-", "🎧 الصوتيات والصور", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=perfumes&rh=p_8%3A70-", "🌸 العطور 70% خصم", 'huge_cat'),
+    ("https://www.amazon.sa/s?i=watches&rh=p_8%3A70-", "⌚ الساعات 70% خصم", 'huge_cat'),
+]
+
+# ========== نظام تدوير الصفحات الشامل المستمر بلا نهاية ==========
 class PageRotationManager:
     def __init__(self):
-        self.visited_pages = {}   # page_id -> timestamp الزيارة
+        self.visited_pages = set()
         self.page_queue_amazon = deque()
         self.page_queue_now = deque()
         self.all_pages = []
         self.rotation_count = 0
 
-    def load_state(self):
-        try:
-            if os.path.exists('page_rotation.json'):
-                with open('page_rotation.json', 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    v = data.get('visited', {})
-                    if isinstance(v, list):  # توافق مع الصيغة القديمة
-                        self.visited_pages = {p: datetime.now().isoformat() for p in v}
-                    else:
-                        self.visited_pages = v
-                    self.rotation_count = data.get('rotation_count', 0)
-        except Exception as e:
-            logger.error(f"Error loading rotation state: {e}")
-
-    def save_state(self):
-        try:
-            with open('page_rotation.json', 'w', encoding='utf-8') as f:
-                json.dump({
-                    'visited': self.visited_pages,
-                    'rotation_count': self.rotation_count,
-                    'last_update': datetime.now().isoformat()
-                }, f)
-        except Exception as e:
-            logger.error(f"Error saving rotation state: {e}")
-
     def generate_all_pages(self, categories):
         self.all_pages = []
         for base_url, cat_name, cat_type in categories:
-            max_pages = PAGES_CONFIG.get(cat_type, 3)
+            max_pages = PAGES_CONFIG.get(cat_type, 15)
             for page_num in range(1, max_pages + 1):
                 page_url = self._build_page_url(base_url, page_num)
                 page_id = f"{cat_name}_page{page_num}"
@@ -120,17 +147,16 @@ class PageRotationManager:
                     'base_url': base_url
                 })
         self._refill_queues()
-        logger.info(f"📚 Generated {len(self.all_pages)} pages from {len(categories)} categories")
+        logger.info(f"📚 Full Scanning Engine Initialized: Generated {len(self.all_pages)} Pages across All Categories!")
         return self.all_pages
 
     def _build_page_url(self, base_url, page_num):
         if page_num == 1:
             return base_url
         separator = '&' if '?' in base_url else '?'
-        return f"{base_url}{separator}page={page_num}" if 's?' in base_url else f"{base_url}{separator}pg={page_num}"
+        return f"{base_url}{separator}page={page_num}"
 
     def _refill_queues(self):
-        # عبّي الصفوف بالصفحات اللي لسه متزارتش فقط
         amazon_pages = [p for p in self.all_pages if not p['type'].startswith('now') and p['id'] not in self.visited_pages]
         now_pages = [p for p in self.all_pages if p['type'].startswith('now') and p['id'] not in self.visited_pages]
 
@@ -140,51 +166,35 @@ class PageRotationManager:
         self.page_queue_amazon = deque(amazon_pages)
         self.page_queue_now = deque(now_pages)
 
-    def has_unvisited(self):
-        return any(p['id'] not in self.visited_pages for p in self.all_pages)
-
     def get_balanced_batch(self, batch_size=10):
-        """دفعة متوازنة من صفحات جديدة تماماً (مش متزورة قبل كده)"""
+        """تجهيز دفعة صفحات؛ وفي حال انتهاء القائمة، يتم التحديث والتكرار فوراً"""
         batch = []
         half = batch_size // 2
 
-        for _ in range(half):
-            while self.page_queue_amazon:
-                page = self.page_queue_amazon.popleft()
-                if page['id'] not in self.visited_pages:
-                    batch.append(page)
-                    break
+        # إذا خلصت الصفحات، أعد فتح الدورة فوراً للتحديث المستمر!
+        if not self.page_queue_amazon and not self.page_queue_now:
+            self.restart_full_cycle()
 
         for _ in range(half):
-            while self.page_queue_now:
+            if self.page_queue_amazon:
+                page = self.page_queue_amazon.popleft()
+                self.visited_pages.add(page['id'])
+                batch.append(page)
+
+        for _ in range(half):
+            if self.page_queue_now:
                 page = self.page_queue_now.popleft()
-                if page['id'] not in self.visited_pages:
-                    batch.append(page)
-                    break
+                self.visited_pages.add(page['id'])
+                batch.append(page)
 
         return batch
 
-    def mark_visited(self, page_id):
-        """تسجيل الصفحة كمتزورة - مش هنرجع لها تاني"""
-        self.visited_pages[page_id] = datetime.now().isoformat()
-        self.save_state()
-
-    def reset_old_visits(self):
-        """إعادة فتح الصفحات اللي فات عليها أسبوع أو أكتر"""
-        now = datetime.now()
-        try:
-            old = [pid for pid, ts in self.visited_pages.items()
-                   if (now - datetime.fromisoformat(ts)).days >= RESEND_COOLDOWN_DAYS]
-        except Exception:
-            old = list(self.visited_pages.keys())
-        for pid in old:
-            del self.visited_pages[pid]
-        if old:
-            self.rotation_count += 1
-            self._refill_queues()
-            self.save_state()
-            logger.info(f"🔄 Weekly reset: reopened {len(old)} pages")
-        return len(old)
+    def restart_full_cycle(self):
+        """إعادة الدورة فوراً للبحث عن العروض الجديدة والمحدثة من أمازون"""
+        self.visited_pages.clear()
+        self.rotation_count += 1
+        self._refill_queues()
+        logger.info(f"🔄 Completed Full Scan Cycle #{self.rotation_count}! Re-shuffling and restarting endless scan...")
 
     def get_stats(self):
         visited = len(self.visited_pages)
@@ -207,10 +217,6 @@ def load_database():
                 data = json.load(f)
                 sent_log = data.get('sent_log', {})
                 hash_log = data.get('hash_log', {})
-                if not sent_log and data.get('ids'):
-                    sent_log = {i: datetime.now().isoformat() for i in data.get('ids', [])}
-                if not hash_log and data.get('hashes'):
-                    hash_log = {h: datetime.now().isoformat() for h in data.get('hashes', [])}
                 sent_products = set(sent_log.keys())
                 sent_hashes = set(hash_log.keys())
     except Exception as e:
@@ -273,7 +279,6 @@ def get_product_id(deal):
     return f"HASH_{hashlib.md5(key.encode()).hexdigest()[:12]}"
 
 def is_on_cooldown(deal_id, title):
-    """ممنوع إعادة الإرسال إلا بعد أسبوع (7 أيام)"""
     now = datetime.now()
     ts = sent_log.get(deal_id)
     if ts:
@@ -307,89 +312,13 @@ def create_session():
 def fetch_page(session, url):
     for i in range(2):
         try:
-            time.sleep(random.uniform(1, 2))
-            r = session.get(url, timeout=15)
+            time.sleep(random.uniform(0.5, 1.5))
+            r = session.get(url, timeout=12)
             if r.status_code == 200:
                 return r.text
         except Exception:
             pass
     return None
-
-PAGES_CONFIG = {
-    'best_sellers': 3,
-    'deals': 4,
-    'warehouse': 3,
-    'outlet': 3,
-    'clearance': 4,
-    'now': 5,
-    'now_grocery': 4,
-    'now_supermarket': 5,
-    'now_fruits': 4,
-    'now_vegetables': 4,
-    'now_meat': 4,
-    'now_dairy': 4,
-    'now_bakery': 4,
-    'now_frozen': 4,
-    'now_drinks': 4,
-    'now_snacks': 4,
-    'now_baby': 4,
-    'now_pet_food': 4,
-    'now_cleaning': 4,
-    'now_personal_care': 4,
-    'now_daily_deals': 5,
-    'now_breakfast': 4,
-    'now_pantry': 4,
-    'dept': 4,
-}
-
-CATEGORIES_DEF = [
-    ("https://www.amazon.sa/s?k=fresh&rh=p_8%3A70-", "⚡ Amazon Now Fresh", 'now'),
-    ("https://www.amazon.sa/s?k=amazon+now&rh=p_8%3A70-", "⚡ Amazon Now Deals", 'now_daily_deals'),
-    ("https://www.amazon.sa/s?k=supermarket&rh=p_8%3A70-", "🛒 Supermarket Deals", 'now_supermarket'),
-    ("https://www.amazon.sa/s?k=groceries&rh=p_8%3A70-", "🛒 Groceries 70% Off", 'now_grocery'),
-    ("https://www.amazon.sa/s?k=fruits&rh=p_8%3A70-", "🍎 Fruits", 'now_fruits'),
-    ("https://www.amazon.sa/s?k=vegetables&rh=p_8%3A70-", "🥬 Vegetables", 'now_vegetables'),
-    ("https://www.amazon.sa/s?k=meat&rh=p_8%3A70-", "🥩 Meat & Poultry", 'now_meat'),
-    ("https://www.amazon.sa/s?k=dairy&rh=p_8%3A70-", "🥛 Dairy & Eggs", 'now_dairy'),
-    ("https://www.amazon.sa/s?k=bakery&rh=p_8%3A70-", "🍞 Bakery", 'now_bakery'),
-    ("https://www.amazon.sa/s?k=frozen&rh=p_8%3A70-", "🧊 Frozen Food", 'now_frozen'),
-    ("https://www.amazon.sa/s?k=drinks&rh=p_8%3A70-", "🥤 Drinks & Beverages", 'now_drinks'),
-    ("https://www.amazon.sa/s?k=snacks&rh=p_8%3A70-", "🍿 Snacks", 'now_snacks'),
-    ("https://www.amazon.sa/s?k=baby+food&rh=p_8%3A70-", "👶 Baby Food", 'now_baby'),
-    ("https://www.amazon.sa/s?k=pet+food&rh=p_8%3A70-", "🐾 Pet Food", 'now_pet_food'),
-    ("https://www.amazon.sa/s?k=cleaning&rh=p_8%3A70-", "🧼 Cleaning Products", 'now_cleaning'),
-    ("https://www.amazon.sa/s?k=personal+care&rh=p_8%3A70-", "🧴 Personal Care", 'now_personal_care'),
-    ("https://www.amazon.sa/s?k=breakfast&rh=p_8%3A70-", "🥣 Breakfast & Cereal", 'now_breakfast'),
-    ("https://www.amazon.sa/s?k=rice+and+pasta&rh=p_8%3A70-", "🍚 Rice & Pasta", 'now_pantry'),
-
-    ("https://www.amazon.sa/s?rh=p_8%3A70-99", "🔥 All Deals 70% Off", 'deals'),
-    ("https://www.amazon.sa/gp/goldbox", "🔥 Goldbox Today Deals", 'deals'),
-    ("https://www.amazon.sa/gp/warehouse-deals", "🏭 Warehouse Deals", 'warehouse'),
-    ("https://www.amazon.sa/outlet", "🎁 Outlet Store", 'outlet'),
-
-    ("https://www.amazon.sa/gp/bestsellers/electronics", "📱 Electronics Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/fashion", "👕 Fashion Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/beauty", "💄 Beauty Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/grocery", "🥫 Grocery Best Seller", 'best_sellers'),
-    ("https://www.amazon.sa/gp/bestsellers/home", "🏠 Home Best Seller", 'best_sellers'),
-
-    ("https://www.amazon.sa/s?k=toys&rh=p_8%3A70-", "🧸 Toys & Games", 'dept'),
-    ("https://www.amazon.sa/s?k=sports&rh=p_8%3A70-", "⚽ Sports & Outdoors", 'dept'),
-    ("https://www.amazon.sa/s?k=kitchen&rh=p_8%3A70-", "🍳 Kitchen & Dining", 'dept'),
-    ("https://www.amazon.sa/s?k=tools&rh=p_8%3A70-", "🔧 Tools & DIY", 'dept'),
-    ("https://www.amazon.sa/s?k=car+accessories&rh=p_8%3A70-", "🚗 Car Accessories", 'dept'),
-    ("https://www.amazon.sa/s?k=baby+products&rh=p_8%3A70-", "🍼 Baby Products", 'dept'),
-    ("https://www.amazon.sa/s?k=pet+supplies&rh=p_8%3A70-", "🐕 Pet Supplies", 'dept'),
-    ("https://www.amazon.sa/s?k=office+supplies&rh=p_8%3A70-", "📎 Office Supplies", 'dept'),
-    ("https://www.amazon.sa/s?k=perfume&rh=p_8%3A70-", "🌸 Perfumes 70% Off", 'dept'),
-    ("https://www.amazon.sa/s?k=watches&rh=p_8%3A70-", "⌚ Watches 70% Off", 'dept'),
-    ("https://www.amazon.sa/s?k=phone+accessories&rh=p_8%3A70-", "📱 Phone Accessories", 'dept'),
-    ("https://www.amazon.sa/s?k=gaming&rh=p_8%3A70-", "🎮 Gaming Deals", 'dept'),
-    ("https://www.amazon.sa/s?k=home+appliances&rh=p_8%3A70-", "🔌 Home Appliances", 'dept'),
-    ("https://www.amazon.sa/s?k=home+improvement&rh=p_8%3A70-", "🏡 Home Improvement", 'dept'),
-    ("https://www.amazon.sa/s?k=hair+care&rh=p_8%3A70-", "💇 Hair Care", 'dept'),
-    ("https://www.amazon.sa/s?k=skin+care&rh=p_8%3A70-", "✨ Skin Care", 'dept'),
-]
 
 def is_valid_deal(deal):
     if deal['discount'] < MIN_DISCOUNT or deal['price'] <= 0 or deal['old_price'] <= deal['price']:
@@ -526,7 +455,6 @@ def scan_batch_and_send(bot, target_chat_id=None, limit=10):
 
     for page_info in pages:
         html = fetch_page(session, page_info['url'])
-        page_rotator.mark_visited(page_info['id'])
 
         if not html:
             continue
@@ -544,43 +472,33 @@ def scan_batch_and_send(bot, target_chat_id=None, limit=10):
                 if send_deal(bot, deal, target_chat_id=target_chat_id):
                     found_count += 1
 
-        time.sleep(random.uniform(1, 2))
+        time.sleep(random.uniform(0.5, 1.5))
     return found_count
 
 def auto_scan_and_send(bot):
-    if not page_rotator.all_pages:
-        page_rotator.generate_all_pages(CATEGORIES_DEF)
-        page_rotator.load_state()
+    page_rotator.generate_all_pages(CATEGORIES_DEF)
 
     while True:
         try:
-            if not page_rotator.has_unvisited():
-                page_rotator.reset_old_visits()
-                if not page_rotator.has_unvisited():
-                    logger.info("✅ All pages visited. Waiting for weekly reset...")
-                    time.sleep(3600)
-                    continue
-
-            scan_batch_and_send(bot)
-            time.sleep(15)
+            scan_batch_and_send(bot, limit=10)
+            time.sleep(3)  # سرعة دائرية متواصلة بدون توقف طويل
         except Exception as e:
             logger.error(f"Error in auto scan loop: {e}")
-            time.sleep(10)
+            time.sleep(5)
 
 # ========== معالجة الأوامر والرسائل النصية ==========
 def start_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text("🤖 أهلاً بك! البوت يعمل 24 ساعة للفحص التلقائي.\n\n💬 ابعت لي **\"هاي\"** في أي وقت وهبحث لك في صفحات جديدة تماماً عن أقوى العروض من أمازون وأمازون ناو!\n\n⏳ كل منتج بيترسل مرة واحدة بس ومبيترجعش إلا بعد أسبوع.")
+    update.message.reply_text("🤖 أهلاً بك! البوت يعمل الآن في مسح شامل وغير محدود لملايين منتجات أمازون وأمازون ناو 24/7!\n\n💬 ابعتلي أي رسالة وهبحثلك فوراً في صفحات جديدة.")
 
 def status_cmd(update: Update, context: CallbackContext):
     stats = page_rotator.get_stats()
     update.message.reply_text(
-        f"📊 *حالة البوت:*\n\n"
-        f"📦 منتجات مبعوتة: {len(sent_log)}\n"
-        f"🚫 إعادة الإرسال بعد: {RESEND_COOLDOWN_DAYS} أيام\n"
-        f"📄 إجمالي الصفحات: {stats['total_pages']}\n"
-        f"✅ صفحات متفحوصة: {stats['visited_pages']}\n"
-        f"🔜 صفحات متبقية: {stats['remaining_pages']}\n"
-        f"📈 نسبة الفحص: {stats['progress_percent']:.1f}%",
+        f"📊 *حالة الفحص المستمر:*\n\n"
+        f"📦 إجمالي العروض المبعوثة: {len(sent_log)}\n"
+        f"📄 إجمالي الصفحات في الدورة الواحدة: {stats['total_pages']}\n"
+        f"✅ صفحات تم فحصها في الدورة الحالية: {stats['visited_pages']}\n"
+        f"🔄 عدد الدورات الكاملة التي أنجزها البوت: {stats['rotation_count']}\n"
+        f"📈 نسبة إنجاز الدورة الحالية: {stats['progress_percent']:.1f}%",
         parse_mode='Markdown'
     )
 
@@ -591,30 +509,19 @@ def clear_cmd(update: Update, context: CallbackContext):
     hash_log.clear()
     page_rotator.visited_pages.clear()
     page_rotator._refill_queues()
-    page_rotator.save_state()
     save_database()
-    update.message.reply_text("🗑️ تم مسح كل السجلات! هيبدأ فحص جديد من الأول.")
+    update.message.reply_text("🗑️ تم مسح سجل الإرسال وإعادة الفحص من البداية!")
 
 def handle_text_messages(update: Update, context: CallbackContext):
     chat_id = update.message.chat_id
-    page_rotator.reset_old_visits()
-
-    if not page_rotator.has_unvisited():
-        update.message.reply_text("✅ تم فحص جميع الصفحات حالياً! ⏳ الفحص بيتجدد تلقائياً بعد أسبوع من آخر زيارة لكل صفحة.")
-        return
-
-    update.message.reply_text("🔎 جاري البحث فوراً في صفحات جديدة تماماً من أمازون وأمازون ناو بالتوازي... ⏳")
-
+    update.message.reply_text("🔎 جاري المسح اللحظي في صفحات أمازون وأمازون ناو... ⏳")
     found = scan_batch_and_send(context.bot, target_chat_id=chat_id, limit=8)
 
     if found == 0:
-        update.message.reply_text("👍 تم فحص الدفعة الحالية، مفيش عروض جديدة بخصم 70%+ دلوقتي. ابعتلي تاني وهفحصلك صفحات تانية جديدة!")
+        update.message.reply_text("👍 البوت يمسح باستمرار، لم يتم العثور على عروض 70%+ جديدة في الدفعة الحالية. ابعتلي تاني في أي وقت!")
 
 def main():
     load_database()
-
-    page_rotator.generate_all_pages(CATEGORIES_DEF)
-    page_rotator.load_state()
 
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=keep_alive_ping, daemon=True).start()
@@ -629,7 +536,7 @@ def main():
     dp.add_handler(CommandHandler("clear", clear_cmd))
     dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_text_messages))
 
-    logger.info("🤖 Telegram Bot ready & Scanning...")
+    logger.info("🤖 Continuous Amazon Crawler Bot Active!")
     updater.start_polling(drop_pending_updates=True)
     updater.idle()
 
