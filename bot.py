@@ -10,7 +10,7 @@ import logging
 import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urljoin
 
 import cloudscraper
 import pandas as pd
@@ -33,11 +33,11 @@ PORT = int(os.environ.get("PORT", 8080))
 DB_PATH = os.getenv("DB_PATH", "bot_database.json")   # لازم يكون على تخزين دائم (Volume/Disk)
 
 RESEND_COOLDOWN_DAYS = 7     # نفس العرض ما يتبعتش تاني قبل أسبوع
-PAGE_RESCAN_HOURS = 24       # نفس الصفحة ما تتفحصش تاني قبل 24 ساعة
+PAGE_RESCAN_HOURS = 24 * 7   # ✅ الصفحة اللي اتفحصت ما تتفحصش تاني إلا بعد أسبوع كامل
 MAX_PAGES = 20               # أمازون بيوقف النتائج تقريباً بعد كده
 MIN_DISCOUNT = 70            # أقل خصم
 MIN_RATING = 0.0             # أقل تقييم (نجوم) عشان نضمن إن الناس بتشتريه وراضية عنه
-MIN_REVIEWS = 0             # أقل عدد تقييمات
+MIN_REVIEWS = 0              # أقل عدد تقييمات
 
 # ==================== الحالة المشتركة ====================
 state_lock = threading.RLock()
@@ -116,18 +116,18 @@ tires,engine oil,seat covers,cat food,dog food,cat litter,pet toys,aquarium,
 ديكور,إضاءة,أثاث,مستلزمات حيوانات,أدوات رياضية,دراجات,كاميرات,طابعات,شاشات,لابتوب,تابلت
 """
 
-_NOW_KEYWORDS_RAW = """
-fresh,amazon now,supermarket,groceries,grocery,fruits,vegetables,meat,dairy,bakery,frozen,drinks,snacks,
-baby food,pet food,cleaning,personal care,breakfast,rice and pasta,water,coffee,tea,chocolate,juice,
-cooking oil,sugar and salt,spices,canned food,nuts,dates,diapers,tissues,laundry,dishwashing,shampoo,
-vitamins,biscuits,noodles,rice,pasta,flour,sugar,salt,milk,cheese,yogurt,butter,eggs,chicken,beef,
-lamb,fish,shrimp,bread,cereal,oats,honey,jam,candy,chips,cookies,soda,energy drink,canned tuna,
-canned beans,tomato paste,sauce,ketchup,mayonnaise,olives,pickles,instant soup,frozen vegetables,
-ice cream,baby formula,baby cereal,baby wipes,toilet paper,detergent,fabric softener,dishwashing liquid,
-floor cleaner,air freshener,trash bags,aluminum foil,sponge,toothpaste,soap,sanitary pads,razor,
-أرز,مكرونة,زيت,سكر,شاي,قهوة,حليب,جبن,لبن,بيض,دجاج,لحم,سمك,خبز,عسل,تمر,مكسرات,شوكولاتة,عصير,مياه,
-منظفات,حفاضات,مناديل,معجون أسنان,شامبو
-"""
+# ==================== Amazon Now (yalla) ====================
+# بحث الكلمات على Amazon Now مش شغال — بنفحص الأقسام نفسها بدل كده
+NOW_BRAND = "sAuWWBROaG"
+NOW_STOREFRONT = f"https://www.amazon.sa/-/en/fmc/storefront?almBrandId={NOW_BRAND}"
+
+# أقسام yalla المعروفة على amazon.sa (بيتم اكتشاف باقي الأقسام تلقائياً من الواجهة)
+NOW_FMC_CATEGORIES = [
+    ("Fruits-Vegetables", "214989746031", "🥬 Amazon Now: خضروات وفواكه"),
+    ("Fresh-Fruits-Vegetables", "16895312031", "🍎 Amazon Now: طازج"),
+    ("Beverages-Coffee-Tea", "16895298031", "🥤 Amazon Now: مشروبات وقهوة"),
+    ("Beauty", "12462992031", "💄 Amazon Now: تجميل وعطور"),
+]
 
 
 def _split(raw):
@@ -146,10 +146,16 @@ def build_sources():
         q = quote_plus(kw)
         for sort in ("", POP, REV):
             sources.append((f"{BASE}k={q}&{DISC}{sort}", f"🔎 {kw}", 'amazon'))
-    for kw in _split(_NOW_KEYWORDS_RAW):
-        q = quote_plus(kw)
-        for sort in ("", POP):
-            sources.append((f"{BASE}k={q}&{DISC}{sort}", f"⚡ {kw}", 'now'))
+
+    # ✅ Amazon Now: السوبرماركت كامل + أقسام yalla الحقيقية + واجهة الاكتشاف
+    for sort in ("", POP, REV):
+        sources.append((f"{BASE}i=grocery&{DISC}99{sort}", "🛒 سوبرماركت (Grocery)", 'now'))
+    for slug, node, label in NOW_FMC_CATEGORIES:
+        for n in range(1, 6):   # أقسام yalla محدودة الصفحات غالباً
+            url = (f"https://www.amazon.sa/-/en/fmc/category/yalla/{slug}"
+                   f"?almBrandId={NOW_BRAND}&node={node}" + (f"&page={n}" if n > 1 else ""))
+            sources.append((url, label, 'now'))
+    sources.append((NOW_STOREFRONT, "🏪 Amazon Now: الواجهة", 'now'))
 
     seen, out = set(), []
     for u, n, t in sources:
@@ -163,36 +169,60 @@ def build_sources():
 class PageRotator:
     """
     كل مرة بياخد الصفحات اللي ما اتفحصتش من أطول وقت (أو عمرها ما اتفحصت).
-    الصفحة اللي اتفحصت في آخر 24 ساعة بتتخطى، فمفيش لفّ على نفس الصفحات.
+    الصفحة اللي اتفحصت في آخر أسبوع بتتخطى، فمفيش لفّ على نفس الصفحات.
+    force=True بيلغي شرط الأسبوع ويرجع يفحص أقدم الصفحات (للرسائل اليدوية).
     """
 
     def __init__(self):
         self.pages = {'amazon': [], 'now': []}
         self.total = 0
+        self._bases = set()
 
     def build(self, sources):
         for base_url, name, typ in sources:
             for n in range(1, MAX_PAGES + 1):
                 url = base_url if n == 1 else f"{base_url}&page={n}"
-                self.pages[typ].append({
-                    'url': url, 'base_url': base_url, 'category': name,
-                    'type': typ, 'page_num': n,
-                })
+                self._add(base_url, url, name, typ, n)
         self.total = sum(len(v) for v in self.pages.values())
         logger.info(f"📚 Total pages in rotation: {self.total}")
 
-    def _eligible(self, p, now):
-        if now - page_log.get(p['url'], 0) < PAGE_RESCAN_HOURS * 3600:
+    def _add(self, base_url, url, name, typ, page_num):
+        if url in self._bases:
+            return False
+        self._bases.add(url)
+        self.pages[typ].append({
+            'url': url, 'base_url': base_url, 'category': name,
+            'type': typ, 'page_num': page_num,
+        })
+        self.total += 1
+        return True
+
+    def add_now_pages(self, base_url, name, max_pages=10):
+        """إضافة قسم Amazon Now جديد اتاكتشف من الواجهة"""
+        with state_lock:
+            if base_url in {p['base_url'] for p in self.pages['now']}:
+                return 0
+            added = 0
+            for n in range(1, max_pages + 1):
+                url = base_url if n == 1 else f"{base_url}&page={n}"
+                if self._add(base_url, url, name, 'now', n):
+                    added += 1
+            if added:
+                logger.info(f"🆕 قسم Amazon Now جديد اتضاف: {name} ({added} صفحة)")
+            return added
+
+    def _eligible(self, p, now, force=False):
+        if not force and now - page_log.get(p['url'], 0) < PAGE_RESCAN_HOURS * 3600:
             return False
         dead = dead_log.get(p['base_url'])
         if dead and p['page_num'] > dead[0] and now - dead[1] < PAGE_RESCAN_HOURS * 3600:
             return False
         return True
 
-    def _pick(self, typ, k, now):
+    def _pick(self, typ, k, now, force=False):
         if k <= 0:
             return []
-        cands = (p for p in self.pages[typ] if self._eligible(p, now))
+        cands = (p for p in self.pages[typ] if self._eligible(p, now, force))
         picked = heapq.nsmallest(
             k, cands,
             key=lambda p: (page_log.get(p['url'], 0), p['page_num'], random.random())
@@ -201,14 +231,15 @@ class PageRotator:
             page_log[p['url']] = now
         return picked
 
-    def next_batch(self, n):
+    def next_batch(self, n, force=False):
         now = time.time()
         with state_lock:
-            batch = self._pick('amazon', n - n // 2, now) + self._pick('now', n // 2, now)
+            batch = self._pick('amazon', n - n // 2, now, force) + \
+                    self._pick('now', n // 2, now, force)
             missing = n - len(batch)
             for typ in ('amazon', 'now'):
                 if missing > 0:
-                    extra = self._pick(typ, missing, now)
+                    extra = self._pick(typ, missing, now, force)
                     batch += extra
                     missing -= len(extra)
         random.shuffle(batch)
@@ -258,7 +289,8 @@ def load_database():
 def save_database():
     try:
         with state_lock:
-            cutoff = time.time() - 3 * 86400
+            # ✅ مهم جداً: نحتفظ بسجل الفحص لمدة أسبوع + يوم عشان شرط الأسبوع ما يتلغاش
+            cutoff = time.time() - (PAGE_RESCAN_HOURS + 24) * 3600
             for u in [u for u, t in page_log.items() if t < cutoff]:
                 del page_log[u]
             tcut = (datetime.now() - timedelta(days=RESEND_COOLDOWN_DAYS * 2)).isoformat()
@@ -418,7 +450,18 @@ def parse_item(item, category, cat_type):
         return None
 
     title_el = item.select_one('h2')
-    title = title_el.get_text(' ', strip=True) if title_el else ''
+    if not title_el:
+        # ✅ صفحات Amazon Now (fmc) شكلها مختلف شوية
+        title_el = item.select_one('[aria-label]') or item.select_one('img[alt]')
+    if title_el:
+        if title_el.name == 'img':
+            title = (title_el.get('alt') or '').strip()
+        elif title_el.has_attr('aria-label'):
+            title = title_el.get('aria-label', '').strip()
+        else:
+            title = title_el.get_text(' ', strip=True)
+    else:
+        title = ''
     if len(title) < 5:
         return None
 
@@ -461,9 +504,12 @@ def parse_item(item, category, cat_type):
         stats['skipped_book'] += 1
         return None
 
-    # الجودة: لازم تقييم عالي وعدد تقييمات كفاية (دليل إن الناس بتشتريه)
+    # الجودة: منتجات ناو الطازجة أغلبها ماعندهاش تقييمات —
+    # الغياب بيتحسب 0 بدل الرفض (وده مطابق لحدود MIN_RATING=0 / MIN_REVIEWS=0)
     rating, reviews = parse_rating_reviews(item)
-    if rating is None or reviews is None or rating < MIN_RATING or reviews < MIN_REVIEWS:
+    rating = rating if rating is not None else 0.0
+    reviews = reviews if reviews is not None else 0
+    if rating < MIN_RATING or reviews < MIN_REVIEWS:
         stats['skipped_low_quality'] += 1
         return None
 
@@ -486,208 +532,3 @@ def build_message(deal, status, prev_rec):
     esc = html.escape
     if status == 'reminder':
         days = 7
-        try:
-            days = (datetime.now() - datetime.fromisoformat(prev_rec['ts'])).days
-        except Exception:
-            pass
-        header = f"🔁 <b>تذكير: العرض ده لسه موجود!</b> (اتبعت من {days} يوم)"
-        old_p = prev_rec.get('price') if prev_rec else None
-        if old_p and abs(old_p - deal['price']) > 0.01:
-            header += f"\nالسعر وقتها: {old_p:.2f} ريال"
-    elif deal['type'] == 'now':
-        header = "⚡ <b>Amazon Now — عرض جديد!</b>"
-    else:
-        header = "🔥 <b>عرض جديد!</b>"
-
-    savings = deal['old_price'] - deal['price']
-    return (
-        f"{header}\n\n"
-        f"📦 {esc(deal['title'][:120])}\n\n"
-        f"💵 <b>{deal['price']:.2f} ريال</b>\n"
-        f"🏷️ قبل: {deal['old_price']:.2f} ريال\n"
-        f"💰 توفير: {savings:.2f} ريال ({deal['discount']}%)\n"
-        f"⭐ {deal['rating']} ({deal['reviews']:,} تقييم)\n"
-        f"📍 {esc(deal['category'])}\n\n"
-        f"🔗 <a href=\"{esc(deal['link'])}\">عرض المنتج على Amazon</a>"
-    )
-
-
-def send_deal(bot, deal, target_chat_id=None):
-    chat_id = target_chat_id or TELEGRAM_CHAT_ID
-    res = try_reserve(deal)
-    if res is None:
-        stats['skipped_duplicate'] += 1
-        return False
-    status, prev = res
-    prev_rec = prev[0]
-    try:
-        bot.send_message(chat_id=chat_id, text=build_message(deal, status, prev_rec),
-                         parse_mode='HTML')
-        stats['sent_reminder' if status == 'reminder' else 'sent_new'] += 1
-        logger.info(f"✅ Sent ({status}): {deal['title'][:40]} - {deal['discount']}%")
-        time.sleep(0.4)   # تجنب حد الإرسال في تليجرام
-        return True
-    except Exception as e:
-        rollback(deal, prev)   # لو الإرسال فشل، نرجّع الحالة عشان يتجرب تاني بعدين
-        logger.error(f"Error sending deal: {e}")
-        return False
-
-
-# ==================== الفحص ====================
-def create_session():
-    session = cloudscraper.create_scraper(
-        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True},
-        delay=5
-    )
-    session.headers.update({
-        'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Referer': 'https://www.amazon.sa/',
-    })
-    return session
-
-
-def fetch_page(session, url):
-    for _ in range(2):
-        try:
-            time.sleep(random.uniform(0.5, 1.5))
-            r = session.get(url, timeout=15)
-            if r.status_code == 200:
-                return r.text
-        except Exception:
-            pass
-    return None
-
-
-def scan_batch_and_send(bot, target_chat_id=None, limit=10):
-    """بيرجّع عدد العروض المبعوثة، أو None لو مفيش صفحات جديدة تتفحص"""
-    pages = rotator.next_batch(limit)
-    if not pages:
-        return None
-
-    session = create_session()
-    sent_deals, failures = [], 0
-
-    for page in pages:
-        page_html = fetch_page(session, page['url'])
-        if not page_html:
-            failures += 1
-            rotator.unmark(page['url'])
-            continue
-
-        soup = BeautifulSoup(page_html, 'html.parser')
-        items = soup.select('div[data-component-type="s-search-result"]')
-
-        if not items:
-            low = page_html.lower()
-            if 'captcha' in low or 'robot check' in low:
-                failures += 1
-                rotator.unmark(page['url'])
-            else:
-                rotator.mark_exhausted(page['base_url'], page['page_num'])
-            continue
-
-        seen_asins = set()
-        for item in items:
-            asin = (item.get('data-asin') or '').upper()
-            if asin in seen_asins:
-                continue
-            seen_asins.add(asin)
-            deal = parse_item(item, page['category'], page['type'])
-            if deal and send_deal(bot, deal, target_chat_id):
-                sent_deals.append(deal)
-
-        time.sleep(random.uniform(0.5, 1.5))
-
-    save_database()
-    export_to_excel(sent_deals)
-
-    if failures == len(pages):
-        logger.warning("⚠️ كل الصفحات فشلت (غالباً حظر مؤقت من أمازون) — استراحة دقيقة")
-        time.sleep(60)
-    return len(sent_deals)
-
-
-def auto_scan_and_send(bot):
-    while True:
-        try:
-            found = scan_batch_and_send(bot, limit=10)
-            if found is None:
-                logger.info("كل الصفحات اتفحصت في آخر 24 ساعة — استراحة 10 دقايق")
-                time.sleep(600)
-            else:
-                time.sleep(3)
-        except Exception as e:
-            logger.error(f"Error in auto scan loop: {e}")
-            time.sleep(10)
-
-
-# ==================== أوامر تليجرام ====================
-def start_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "🤖 أهلاً! البوت بيفحص أمازون وأمازون ناو باستمرار ويبعتلك العروض 70%+ "
-        "اللي عليها تقييمات عالية.\n\n"
-        "• العرض ما بيتبعتش تاني قبل أسبوع، وبعد أسبوع لو لسه موجود بيجيلك تذكير.\n"
-        "• الكتب مستبعدة.\n\n"
-        "💬 ابعتلي أي رسالة وهفحص دفعة صفحات جديدة فوراً.\n"
-        "/status لعرض الإحصائيات"
-    )
-
-
-def status_cmd(update: Update, context: CallbackContext):
-    update.message.reply_text(
-        "📊 حالة البوت:\n\n"
-        f"📦 منتجات اتبعتت (إجمالي): {len(sent_log)}\n"
-        f"📄 صفحات في التدوير: {rotator.total}\n"
-        f"✅ صفحات اتفحصت آخر 24 ساعة: {rotator.scanned_last_24h()}\n\n"
-        f"🆕 عروض جديدة مبعوثة: {stats['sent_new']}\n"
-        f"🔁 تذكيرات مبعوثة: {stats['sent_reminder']}\n"
-        f"⏭️ تم تخطي — مكرر: {stats['skipped_duplicate']}\n"
-        f"📚 تم تخطي — كتب: {stats['skipped_book']}\n"
-        f"👎 تم تخطي — تقييم/مبيعات ضعيفة: {stats['skipped_low_quality']}"
-    )
-
-
-def clear_cmd(update: Update, context: CallbackContext):
-    with state_lock:
-        sent_log.clear()
-        title_log.clear()
-        page_log.clear()
-        dead_log.clear()
-    save_database()
-    update.message.reply_text("🗑️ تم مسح السجل بالكامل. ⚠️ العروض القديمة ممكن تتبعت تاني.")
-
-
-def handle_text_messages(update: Update, context: CallbackContext):
-    chat_id = update.message.chat_id
-    update.message.reply_text("🔎 جاري فحص دفعة جديدة من الصفحات... ⏳")
-    found = scan_batch_and_send(context.bot, target_chat_id=chat_id, limit=8)
-    if not found:
-        update.message.reply_text("👍 مفيش عروض جديدة في الدفعة دي. ابعتلي تاني في أي وقت!")
-
-
-def main():
-    load_database()
-    rotator.build(build_sources())
-
-    threading.Thread(target=run_flask, daemon=True).start()
-    threading.Thread(target=keep_alive_ping, daemon=True).start()
-
-    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
-    dp = updater.dispatcher
-    owner = Filters.chat(chat_id=int(TELEGRAM_CHAT_ID))   # البوت بيرد عليك إنتِ بس
-
-    threading.Thread(target=auto_scan_and_send, args=(updater.bot,), daemon=True).start()
-
-    dp.add_handler(CommandHandler("start", start_cmd, filters=owner))
-    dp.add_handler(CommandHandler("status", status_cmd, filters=owner))
-    dp.add_handler(CommandHandler("clear", clear_cmd, filters=owner))
-    dp.add_handler(MessageHandler(owner & Filters.text & ~Filters.command,
-                                  handle_text_messages, run_async=True))
-
-    logger.info("🤖 Amazon Deals Bot Active!")
-    updater.start_polling(drop_pending_updates=True)
-    updater.idle()
-
-
-if __name__ == "__main__":
-    main()
