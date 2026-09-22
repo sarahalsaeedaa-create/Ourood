@@ -532,3 +532,277 @@ def build_message(deal, status, prev_rec):
     esc = html.escape
     if status == 'reminder':
         days = 7
+        try:
+            days = (datetime.now() - datetime.fromisoformat(prev_rec['ts'])).days
+        except Exception:
+            pass
+        header = f"🔁 <b>تذكير: العرض ده لسه موجود!</b> (اتبعت من {days} يوم)"
+        old_p = prev_rec.get('price') if prev_rec else None
+        if old_p and abs(old_p - deal['price']) > 0.01:
+            header += f"\nالسعر وقتها: {old_p:.2f} ريال"
+    elif deal['type'] == 'now':
+        header = "⚡ <b>Amazon Now — عرض جديد!</b>"
+    else:
+        header = "🔥 <b>عرض جديد!</b>"
+
+    savings = deal['old_price'] - deal['price']
+    stars = f"⭐ {deal['rating']} ({deal['reviews']:,} تقييم)\n" if deal['reviews'] > 0 else ""
+    return (
+        f"{header}\n\n"
+        f"📦 {esc(deal['title'][:120])}\n\n"
+        f"💵 <b>{deal['price']:.2f} ريال</b>\n"
+        f"🏷️ قبل: {deal['old_price']:.2f} ريال\n"
+        f"💰 توفير: {savings:.2f} ريال ({deal['discount']}%)\n"
+        f"{stars}"
+        f"📍 {esc(deal['category'])}\n\n"
+        f"🔗 <a href=\"{esc(deal['link'])}\">عرض المنتج على Amazon</a>"
+    )
+
+
+def send_deal(bot, deal, target_chat_id=None):
+    chat_id = target_chat_id or TELEGRAM_CHAT_ID
+    res = try_reserve(deal)
+    if res is None:
+        stats['skipped_duplicate'] += 1
+        return False
+    status, prev = res
+    prev_rec = prev[0]
+    try:
+        bot.send_message(chat_id=chat_id, text=build_message(deal, status, prev_rec),
+                         parse_mode='HTML')
+        stats['sent_reminder' if status == 'reminder' else 'sent_new'] += 1
+        logger.info(f"✅ Sent ({status}): {deal['title'][:40]} - {deal['discount']}%")
+        time.sleep(0.4)   # تجنب حد الإرسال في تليجرام
+        return True
+    except Exception as e:
+        rollback(deal, prev)   # لو الإرسال فشل، نرجّع الحالة عشان يتجرب تاني بعدين
+        logger.error(f"Error sending deal: {e}")
+        return False
+
+
+# ==================== الفحص ====================
+def create_session():
+    session = cloudscraper.create_scraper(
+        browser={'browser': 'chrome', 'platform': 'windows', 'desktop': True},
+        delay=5
+    )
+    session.headers.update({
+        'Accept-Language': 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://www.amazon.sa/',
+    })
+    return session
+
+
+def fetch_page(session, url):
+    for _ in range(2):
+        try:
+            time.sleep(random.uniform(0.5, 1.5))
+            r = session.get(url, timeout=15)
+            if r.status_code == 200:
+                return r.text
+        except Exception:
+            pass
+    return None
+
+
+def discover_now_categories(soup):
+    """✅ بيلقط أقسام Amazon Now الجديدة من صفحات fmc ويضيفها للتدوير"""
+    found = 0
+    for a in soup.select('a[href*="/fmc/category/"]'):
+        href = a.get('href', '') or ''
+        m = re.search(r'(/fmc/category/[^"?]+).*?[?&]node=(\d+)', href)
+        if not m:
+            continue
+        base = urljoin("https://www.amazon.sa", html.unescape(m.group(1)))
+        base = f"{base}?almBrandId={NOW_BRAND}&node={m.group(2)}"
+        name = a.get_text(' ', strip=True)[:30] or m.group(1).rstrip('/').split('/')[-1]
+        name = re.sub(r'\s+', ' ', name) or "قسم جديد"
+        found += rotator.add_now_pages(base, f"⚡ Amazon Now: {name}")
+    if found:
+        save_database()
+
+
+def extract_items(soup, cat_type):
+    """بيرجّع عناصر المنتجات — مع fallback لصفحات Amazon Now"""
+    items = soup.select('div[data-component-type="s-search-result"]')
+    if items:
+        return items
+    if cat_type == 'now':
+        # صفحات fmc بتبني المنتجات بشكل مختلف
+        raw = [el for el in soup.select('[data-asin]')
+               if re.fullmatch(r'[A-Z0-9]{10}', (el.get('data-asin') or '').strip().upper())]
+        # من البلاطات الكبيرة بس عشان نتجنب التكرار الصغير
+        return [el for el in raw if el.select_one('.a-price, h2, img[alt]')]
+    return []
+
+
+def scan_batch_and_send(bot, target_chat_id=None, limit=10, force=False):
+    """بيرجّع عدد العروض المبعوثة، أو None لو مفيش صفحات متاحة أصلاً (بدون force)"""
+    pages = rotator.next_batch(limit, force=force)
+    if not pages:
+        return None
+
+    session = create_session()
+    sent_deals, failures = [], 0
+    last_asins = {}   # كشف الصفحات اللي بترجع نفس المحتوى (fmc مش بيدعم page=N)
+
+    for page in pages:
+        page_html = fetch_page(session, page['url'])
+        if not page_html:
+            failures += 1
+            rotator.unmark(page['url'])
+            continue
+
+        soup = BeautifulSoup(page_html, 'html.parser')
+        items = extract_items(soup, page['type'])
+
+        # ✅ اكتشاف أقسام Amazon Now الجديدة تلقائياً
+        if page['type'] == 'now':
+            discover_now_categories(soup)
+
+        if not items:
+            low = page_html.lower()
+            if 'captcha' in low or 'robot check' in low:
+                failures += 1
+                rotator.unmark(page['url'])
+            else:
+                rotator.mark_exhausted(page['base_url'], page['page_num'])
+            continue
+
+        seen_asins, page_asins = set(), set()
+        for item in items:
+            asin = (item.get('data-asin') or '').upper()
+            if not asin or asin in seen_asins:
+                continue
+            seen_asins.add(asin)
+            page_asins.add(asin)
+            deal = parse_item(item, page['category'], page['type'])
+            if deal and send_deal(bot, deal, target_chat_id):
+                sent_deals.append(deal)
+
+        # ✅ صفحة رجعت نفس منتجات الصفحة اللي قبلها = القسم ده مالوش صفحات تانية
+        prev = last_asins.get(page['base_url'])
+        if prev is not None and page['page_num'] > 1 and page_asins and page_asins == prev:
+            rotator.mark_exhausted(page['base_url'], page['page_num'])
+        last_asins[page['base_url']] = page_asins
+
+        time.sleep(random.uniform(0.5, 1.5))
+
+    save_database()
+    export_to_excel(sent_deals)
+
+    if failures == len(pages):
+        logger.warning("⚠️ كل الصفحات فشلت (غالباً حظر مؤقت من أمازون) — استراحة دقيقة")
+        time.sleep(60)
+    return len(sent_deals)
+
+
+def scan_until_found(bot, target_chat_id, max_batches=10, batch_size=8):
+    """
+    ✅ بيفحص دفعة ورا دفعة لحد ما يلاقي عرض يتبعت.
+    أول دفعتين بيحترموا قاعدة الأسبوع، وبعدين بيفحص أقدم الصفحات بالإجبار —
+    عشان لما تبعت "هاي" يجيلك عروض دايماً، مش "مفيش عروض".
+    """
+    total = 0
+    for i in range(max_batches):
+        force = i >= 2
+        found = scan_batch_and_send(bot, target_chat_id=target_chat_id,
+                                    limit=batch_size, force=force)
+        if found:
+            total += found
+            return total
+        logger.info(f"دفعة {i+1} من فحص يدوي: لسه مفيش عرض، بنكمل اللف...")
+    return total
+
+
+def auto_scan_and_send(bot):
+    while True:
+        try:
+            found = scan_batch_and_send(bot, limit=10)
+            if found is None:
+                logger.info("كل الصفحات اتفحصت في آخر أسبوع — استراحة ساعة")
+                time.sleep(3600)
+            else:
+                time.sleep(3)
+        except Exception as e:
+            logger.error(f"Error in auto scan loop: {e}")
+            time.sleep(10)
+
+
+# ==================== أوامر تليجرام ====================
+def start_cmd(update: Update, context: CallbackContext):
+    update.message.reply_text(
+        "🤖 أهلاً! البوت بيفحص أمازون وأمازون ناو باستمرار ويبعتلك العروض 70%+ "
+        "اللي عليها تقييمات عالية.\n\n"
+        "• العرض ما بيتبعتش تاني قبل أسبوع، وبعد أسبوع لو لسه موجود بيجيلك تذكير.\n"
+        "• الصفحة اللي اتفحصت ما بتتفحصش تاني إلا بعد أسبوع.\n"
+        "• الكتب مستبعدة.\n\n"
+        "💬 ابعتلي أي رسالة وهفحص دفعة صفحات جديدة فوراً وابعتلك العروض اللي ألاقيها.\n"
+        "/status لعرض الإحصائيات"
+    )
+
+
+def status_cmd(update: Update, context: CallbackContext):
+    update.message.reply_text(
+        "📊 حالة البوت:\n\n"
+        f"📦 منتجات اتبعتت (إجمالي): {len(sent_log)}\n"
+        f"📄 صفحات في التدوير: {rotator.total}\n"
+        f"✅ صفحات اتفحصت آخر 24 ساعة: {rotator.scanned_last_24h()}\n"
+        f"🔁 فترة إعادة فحص الصفحة: {PAGE_RESCAN_HOURS // 24} أيام\n\n"
+        f"🆕 عروض جديدة مبعوثة: {stats['sent_new']}\n"
+        f"🔁 تذكيرات مبعوثة: {stats['sent_reminder']}\n"
+        f"⏭️ تم تخطي — مكرر: {stats['skipped_duplicate']}\n"
+        f"📚 تم تخطي — كتب: {stats['skipped_book']}\n"
+        f"👎 تم تخطي — تقييم/مبيعات ضعيفة: {stats['skipped_low_quality']}"
+    )
+
+
+def clear_cmd(update: Update, context: CallbackContext):
+    with state_lock:
+        sent_log.clear()
+        title_log.clear()
+        page_log.clear()
+        dead_log.clear()
+    save_database()
+    update.message.reply_text("🗑️ تم مسح السجل بالكامل. ⚠️ العروض القديمة ممكن تتبعت تاني.")
+
+
+def handle_text_messages(update: Update, context: CallbackContext):
+    chat_id = update.message.chat_id
+    update.message.reply_text("🔎 جاري فحص صفحات جديدة لحد ما ألاقيلك عروض... ⏳")
+    found = scan_until_found(context.bot, target_chat_id=chat_id,
+                             max_batches=10, batch_size=8)
+    if not found:
+        # ده حرفياً مش هيحصل تقريباً — بس لو حصل، الفحص التلقائي هيبعت فوراً
+        update.message.reply_text(
+            "⏳ بدور في صفحات تانية دلوقتي — أول ما ألاقي عرض هبعتهولك فوراً "
+            "(الفحص التلقائي شغال على مدار الساعة). ابعتلي تاني بعد شوية."
+        )
+
+
+def main():
+    load_database()
+    rotator.build(build_sources())
+
+    threading.Thread(target=run_flask, daemon=True).start()
+    threading.Thread(target=keep_alive_ping, daemon=True).start()
+
+    updater = Updater(TELEGRAM_BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+    owner = Filters.chat(chat_id=int(TELEGRAM_CHAT_ID))   # البوت بيرد عليك إنتِ بس
+
+    threading.Thread(target=auto_scan_and_send, args=(updater.bot,), daemon=True).start()
+
+    dp.add_handler(CommandHandler("start", start_cmd, filters=owner))
+    dp.add_handler(CommandHandler("status", status_cmd, filters=owner))
+    dp.add_handler(CommandHandler("clear", clear_cmd, filters=owner))
+    dp.add_handler(MessageHandler(owner & Filters.text & ~Filters.command,
+                                  handle_text_messages, run_async=True))
+
+    logger.info("🤖 Amazon Deals Bot Active!")
+    updater.start_polling(drop_pending_updates=True)
+    updater.idle()
+
+
+if __name__ == "__main__":
+    main()
