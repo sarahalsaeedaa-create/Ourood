@@ -151,10 +151,11 @@ def build_sources():
     for sort in ("", POP, REV):
         sources.append((f"{BASE}i=grocery&{DISC}99{sort}", "🛒 سوبرماركت (Grocery)", 'now'))
     for slug, node, label in NOW_FMC_CATEGORIES:
-        for n in range(1, 6):   # أقسام yalla محدودة الصفحات غالباً
-            url = (f"https://www.amazon.sa/-/en/fmc/category/yalla/{slug}"
-                   f"?almBrandId={NOW_BRAND}&node={node}" + (f"&page={n}" if n > 1 else ""))
-            sources.append((url, label, 'now'))
+        # ✅ ما بنضيفش &page هنا؛ PageRotator.build() هو اللي بيبني كل أرقام الصفحات لوحده.
+        # (قبل كده كان بيتضاف &page هنا كمان، فالرابط يطلع فيه &page مكرر ويتكسر
+        #  وأمازون ترجع نفس المحتوى أو صفحة فاضية، فالقسم يتعتبر "خلص" بسرعة).
+        url = f"https://www.amazon.sa/-/en/fmc/category/yalla/{slug}?almBrandId={NOW_BRAND}&node={node}"
+        sources.append((url, label, 'now'))
     sources.append((NOW_STOREFRONT, "🏪 Amazon Now: الواجهة", 'now'))
 
     seen, out = set(), []
@@ -197,19 +198,24 @@ class PageRotator:
         self.total += 1
         return True
 
-    def add_now_pages(self, base_url, name, max_pages=10):
-        """إضافة قسم Amazon Now جديد اتاكتشف من الواجهة"""
+    def add_pages(self, base_url, name, typ, max_pages=10):
+        """إضافة قسم/فئة جديدة اتكتشفت أثناء الفحص (أمازون عادي أو Amazon Now)"""
         with state_lock:
-            if base_url in {p['base_url'] for p in self.pages['now']}:
+            if base_url in {p['base_url'] for p in self.pages[typ]}:
                 return 0
             added = 0
             for n in range(1, max_pages + 1):
                 url = base_url if n == 1 else f"{base_url}&page={n}"
-                if self._add(base_url, url, name, 'now', n):
+                if self._add(base_url, url, name, typ, n):
                     added += 1
             if added:
-                logger.info(f"🆕 قسم Amazon Now جديد اتضاف: {name} ({added} صفحة)")
+                icon = "⚡" if typ == 'now' else "🛍️"
+                logger.info(f"🆕 قسم جديد اتضاف {icon} {name} ({added} صفحة)")
             return added
+
+    def add_now_pages(self, base_url, name, max_pages=10):
+        """إضافة قسم Amazon Now جديد اتاكتشف من الواجهة"""
+        return self.add_pages(base_url, name, 'now', max_pages)
 
     def _eligible(self, p, now, force=False):
         if not force and now - page_log.get(p['url'], 0) < PAGE_RESCAN_HOURS * 3600:
@@ -622,6 +628,49 @@ def discover_now_categories(soup):
         save_database()
 
 
+def discover_departments(soup):
+    """✅ بيلقط أي قسم/فئة أمازون عادي (غير Amazon Now) من روابط الصفحة ويضيفها للتدوير.
+    كده مش بنقتصر على الـ ~15 قسم الثابتين في DEPARTMENTS، وبمرور الوقت البوت بيغطي
+    عملياً كل أقسام وفئات amazon.sa اللي بتظهر روابطها في أي صفحة بيفحصها."""
+    found = 0
+    for a in soup.select('a[href*="node="], a[href*="/s?i="], a[href*="/s?k="]'):
+        href = a.get('href', '') or ''
+        href = urljoin("https://www.amazon.sa", html.unescape(href))
+
+        m_node = re.search(r'[?&]node=(\d+)', href)
+        m_i = re.search(r'[?&]i=([a-zA-Z0-9\-]+)', href)
+
+        if m_node:
+            base = f"{BASE}rh=n%3A{m_node.group(1)}%2C{DISC}99"
+        elif m_i:
+            dept = m_i.group(1)
+            if dept in DEPARTMENTS:
+                continue   # موجود أصلاً في القايمة الثابتة، مفيش داعي نكرره
+            base = f"{BASE}i={dept}&{DISC}99"
+        else:
+            continue
+
+        name = a.get_text(' ', strip=True)[:30] or "قسم أمازون"
+        name = re.sub(r'\s+', ' ', name) or "قسم جديد"
+        found += rotator.add_pages(base, f"🛍️ {name}", 'amazon')
+    if found:
+        save_database()
+
+
+def seed_department_discovery():
+    """✅ فحص أولي لدليل أقسام أمازون (site-directory) عند تشغيل البوت،
+    عشان نوسّع تغطية الأقسام من أول لحظة بدل ما نستنى نلاقيها بالصدفة أثناء الفحص العادي."""
+    try:
+        session = create_session()
+        page_html = fetch_page(session, "https://www.amazon.sa/gp/site-directory")
+        if page_html:
+            soup = BeautifulSoup(page_html, 'html.parser')
+            discover_departments(soup)
+            discover_now_categories(soup)
+    except Exception as e:
+        logger.error(f"Error seeding department discovery: {e}")
+
+
 def extract_items(soup, cat_type):
     """بيرجّع عناصر المنتجات — مع fallback لصفحات Amazon Now"""
     items = soup.select('div[data-component-type="s-search-result"]')
@@ -656,9 +705,11 @@ def scan_batch_and_send(bot, target_chat_id=None, limit=10, force=False):
         soup = BeautifulSoup(page_html, 'html.parser')
         items = extract_items(soup, page['type'])
 
-        # ✅ اكتشاف أقسام Amazon Now الجديدة تلقائياً
+        # ✅ اكتشاف أقسام جديدة تلقائياً — أمازون العادي أو Amazon Now
         if page['type'] == 'now':
             discover_now_categories(soup)
+        else:
+            discover_departments(soup)
 
         if not items:
             low = page_html.lower()
@@ -783,6 +834,7 @@ def handle_text_messages(update: Update, context: CallbackContext):
 def main():
     load_database()
     rotator.build(build_sources())
+    seed_department_discovery()   # ✅ توسيع تغطية الأقسام من أول تشغيل
 
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=keep_alive_ping, daemon=True).start()
