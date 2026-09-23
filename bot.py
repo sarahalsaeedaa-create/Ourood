@@ -35,9 +35,8 @@ DB_PATH = os.getenv("DB_PATH", "bot_database.json")   # لازم يكون على
 RESEND_COOLDOWN_DAYS = 7     # نفس العرض ما يتبعتش تاني قبل أسبوع
 PAGE_RESCAN_HOURS = 24 * 7   # ✅ الصفحة اللي اتفحصت ما تتفحصش تاني إلا بعد أسبوع كامل
 MAX_PAGES = 20               # أمازون بيوقف النتائج تقريباً بعد كده
-MIN_DISCOUNT = 70            # أقل خصم
-MIN_RATING = 0.0             # أقل تقييم (نجوم) عشان نضمن إن الناس بتشتريه وراضية عنه
-MIN_REVIEWS = 0              # أقل عدد تقييمات
+MIN_DISCOUNT = 60            # أقل خصم
+
 
 # ==================== الحالة المشتركة ====================
 state_lock = threading.RLock()
